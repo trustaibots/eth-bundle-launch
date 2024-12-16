@@ -1,7 +1,7 @@
 # Eth-Bundle-Launch v1.1
 **Ethereum Token Bundle Launch Project**
 
-This project will perform an bundle token launch of ERC-20 with 300+ wallets snipping. This will be done by 3 steps
+This project facilitates a bundle token launch for an ERC-20 token involving 300+ wallets for sniping. The process is divided into three steps:
 1. Token Contract deployment
 2. Estimate the required ETHs for each buyer wallets
 3. Configure and launch script
