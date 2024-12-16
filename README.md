@@ -93,10 +93,10 @@ export const VERSION = 1.1
 // Sepolia = 11155111
 export const NET_MODE = 11155111             // Set the chain ID to specify whether to launch on Mainnet or Testnet
 export const OWNER_PRIVATE_KEY = "af264be3f6a97b5ef1f19b675e2fe84ed15fd726ba38e59c5468d95f53f6de71"; 
-// Replace this with your own private key.
+// Replace this deployer wallet key with your own private key.
 
 export const BRIBE_PAYER_KEY = "a36d14d380505993394deef92e13d079e1e0053b0f294939d4679c5d3d80671c"; 
-// Replace this with the private key of the bribe payer.
+// Replace this briber wallet key with the one of the bribe payer you have.
 
 export const BUYER_PRIVATE_KEY = [
     "2cc095269dc37126b5df0307534ae78a5c4287459041d3fc3d83225def084b28", // Replace with buyer wallet private keys.
@@ -132,7 +132,9 @@ export const BRIBE_AMOUNT = 0.1;
 - Ensure that all the wallets (Deployer, Briber, and Buyer) have enough balance to cover the transaction fees for sniping the tokens.
 
 Deployer Wallet: Must have enough balance to cover the transaction fee for executing the ```openTrading``` function in the token contract.
+
 Briber Wallet: Must have enough ETH to transfer the bribe and cover the associated transaction fee.
+
 Buyer Wallets: Each buyer wallet must have enough ETH to purchase tokens, along with the transaction fee required for the token swap.
 
 - Confirm that no liquidity pool already exists for the token contract.
