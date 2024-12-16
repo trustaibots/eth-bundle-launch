@@ -46,7 +46,7 @@ apt install python3
 
 - Modify parameters
 
-```
+```python
 // Parameters in calculate_eth_for_wallets.py
 ...
 initial_eth = 2.0	// ETHs in initial liquidity 
