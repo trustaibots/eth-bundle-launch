@@ -116,6 +116,9 @@ export const BUY_AMOUNT = [
     "0.7407", // ...
 ];
 
+// Each private key in the BUYER_PRIVATE_KEY array must correspond to the same index in the BUY_AMOUNT array. 
+// In other words, the size of both arrays should be the same, and each private key should match the respective buy amount
+
 export const TOKEN_ADDRESS = "0xcf1e7Df33a0Cb3046D56B17a5B7b30EA25c2fd44"; 
 // Replace with the address of your deployed token contract.
 
