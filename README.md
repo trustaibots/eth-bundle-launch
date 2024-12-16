@@ -40,8 +40,9 @@ If any function or variable names in the contract are modified:
 Use python script ```./calculate_eth_for_wallets.py``` on Ubuntu
 
 - Install python3
-
+```
 apt install python3
+```
 
 - Modify parameters
 
