@@ -1,6 +1,6 @@
 {
-  "name": "jitolabs-server",
-  "version": "1.0.0",
+  "name": "eth-bundle-launch",
+  "version": "1.1.0",
   "description": "",
   "main": "src/index.ts",
   "scripts": {
