@@ -56,9 +56,9 @@ target_percentage = 80  // Token hold percentage by sniping
 ```
 
 - Execute the python script
-
+```
 python3 calculate_eth_for_wallets.py
-
+```
 Execution results are
 ```bash
 Wallet 1: Needs 0.0325 ETH
