@@ -1,4 +1,2 @@
-peers.json
-genesis.json
-*-packr.go
-config*.json
+yarn.lock
+node_modules
