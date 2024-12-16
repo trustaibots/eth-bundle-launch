@@ -86,7 +86,7 @@ export const SEPOLIA_RPC="https://old-green-glade.ethereum-sepolia.quiknode.pro/
 
 export const FLASHBOTS_ENDPOINT="https://relay.flashbots.net"
 export const SEPOLIA_FLASHBOTS_ENDPOINT="https://relay-sepolia.flashbots.net"
-export const VERSION = 1.0
+export const VERSION = 1.1
 
 // Ethereum = 1,
 // Sepolia = 11155111
