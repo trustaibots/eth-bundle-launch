@@ -33,11 +33,11 @@ Once deployed, ensure that:
 If any function or variable names in the contract are modified:
 
 - Download the updated ABI JSON file using Etherscan or Remix.
-- Replace the file located at src/abi/token-abi.json with the new ABI JSON file.
+- Replace the file located at ```src/abi/token-abi.json``` with the new ABI JSON file.
 
 ## 2. Estimate the required ETHs for each buyer wallets
 
-Use python script ./calculate_eth_for_wallets.py on Ubuntu
+Use python script ```./calculate_eth_for_wallets.py``` on Ubuntu
 
 - Install python3
 
