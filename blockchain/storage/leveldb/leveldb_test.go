@@ -5,7 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/umbracle/minimal/blockchain/storage"
+	"github.com/0xPolygon/minimal/blockchain/storage"
+	"github.com/hashicorp/go-hclog"
 )
 
 func newStorage(t *testing.T) (storage.Storage, func()) {
@@ -13,7 +14,7 @@ func newStorage(t *testing.T) (storage.Storage, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewLevelDBStorage(path, nil)
+	s, err := NewLevelDBStorage(path, hclog.NewNullLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,8 +27,5 @@ func newStorage(t *testing.T) (storage.Storage, func()) {
 }
 
 func TestStorage(t *testing.T) {
-	s, close := newStorage(t)
-	defer close()
-
-	storage.TestStorage(t, s)
+	storage.TestStorage(t, newStorage)
 }

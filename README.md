@@ -1,40 +1,19 @@
-# Minimal
 
-[![CircleCI](https://circleci.com/gh/umbracle/minimal.svg?style=svg)](https://circleci.com/gh/umbracle/minimal)
-[![Join the chat at https://gitter.im/umbracle/minimal](https://badges.gitter.im/umbracle/minimal.svg)](https://gitter.im/umbracle/minimal?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+![Banner](.github/banner.png)
 
-Modular implementation of different stacks of the Ethereum blockchain
+## Polygon SDK
 
-## Commands
+Polygon SDK is a modular and extensible framework for building Ethereum-compatible blockchain networks.
 
-### Agent
+This repository is the first implementation of Polygon SDK, written in Golang. Other implementations, written in other programming languages might be introduced in the future. If you would like to contribute to this or any future implementation, please reach out to [Polygon team](mailto:contact@polygon.technology).
 
-Starts the Ethereum client for the mainnet:
+To find out more about Polygon, visit the [official website](https://polygon.technology/).
 
-```
-$ go run main.go agent [--config ./config.json]
-```
+WARNING: This is a work in progress so architectural changes may happen in the future. The code has not been audited yet, so please contact [Polygon team](mailto:contact@polygon.technology) if you would like to use it in production.
 
-The configuration file can be specified either in HCL or JSON format:
+## Documentation 📝
 
-```
-{
-    "data-dir": "/tmp/data-dir"
-}
-```
+If you'd like to learn more about the Polygon SDK, how it works and how you can use it for your project,
+please check out the **[Polygon SDK Documentation](https://sdk-docs.polygon.technology)**.
 
-Some attributes can be also set from the command line:
-
-```
-$ go run main.go agent --config ./config.json --data-dir /tmp/local
-```
-
-The values from the CLI have preference over the ones in the configuration file.
-
-### Genesis
-
-Generates a test genesis file:
-
-```
-$ go run main.go genesis
-```
+There, you will find the most up to date information regarding potential features, as well as future roadmaps for the SDK.

@@ -2,15 +2,14 @@ package leveldb
 
 import (
 	"fmt"
-	"log"
-	"os"
 
+	"github.com/0xPolygon/minimal/blockchain/storage"
+	"github.com/hashicorp/go-hclog"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/umbracle/minimal/blockchain/storage"
 )
 
 // Factory creates a leveldb storage
-func Factory(config map[string]interface{}, logger *log.Logger) (storage.Storage, error) {
+func Factory(config map[string]interface{}, logger hclog.Logger) (storage.Storage, error) {
 	path, ok := config["path"]
 	if !ok {
 		return nil, fmt.Errorf("path not found")
@@ -23,17 +22,14 @@ func Factory(config map[string]interface{}, logger *log.Logger) (storage.Storage
 }
 
 // NewLevelDBStorage creates the new storage reference with leveldb
-func NewLevelDBStorage(path string, logger *log.Logger) (storage.Storage, error) {
+func NewLevelDBStorage(path string, logger hclog.Logger) (storage.Storage, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err
 	}
-	if logger == nil {
-		logger = log.New(os.Stderr, "", log.LstdFlags)
-	}
 
 	kv := &levelDBKV{db}
-	return storage.NewKeyValueStorage(logger, kv), nil
+	return storage.NewKeyValueStorage(logger.Named("leveldb"), kv), nil
 }
 
 // levelDBKV is the leveldb implementation of the kv storage
@@ -41,17 +37,26 @@ type levelDBKV struct {
 	db *leveldb.DB
 }
 
+// Set sets the key-value pair in leveldb storage
 func (l *levelDBKV) Set(p []byte, v []byte) error {
 	return l.db.Put(p, v, nil)
 }
 
+// Get retrieves the key-value pair in leveldb storage
 func (l *levelDBKV) Get(p []byte) ([]byte, bool, error) {
 	data, err := l.db.Get(p, nil)
 	if err != nil {
 		if err.Error() == "leveldb: not found" {
 			return nil, false, nil
 		}
+
 		return nil, false, err
 	}
+
 	return data, true, nil
+}
+
+// Close closes the leveldb storage instance
+func (l *levelDBKV) Close() error {
+	return l.db.Close()
 }

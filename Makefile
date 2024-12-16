@@ -1,10 +1,18 @@
 
-.PHONY: static-assets
-static-assets:
-	@echo "--> Generating static assets for the json chains"
-	@packr -i ./chain
+.PHONY: download-spec-tests
+download-spec-tests:
+	git submodule init
+	git submodule update
 
-.PHONY: clean
-clean:
-	@echo "--> Cleaning build artifacts"
-	@packr clean
+.PHONY: bindata
+bindata:
+	go-bindata -pkg chain -o ./chain/chain_bindata.go ./chain/chains
+
+.PHONY: protoc
+protoc:
+	protoc --go_out=. --go-grpc_out=. ./minimal/proto/*.proto
+	protoc --go_out=. --go-grpc_out=. ./protocol/proto/*.proto
+	protoc --go_out=. --go-grpc_out=. ./network/proto/test/*.proto
+	protoc --go_out=. --go-grpc_out=. ./network/proto/*.proto
+	protoc --go_out=. --go-grpc_out=. ./txpool/proto/*.proto
+	protoc --go_out=. --go-grpc_out=. ./consensus/ibft/proto/*.proto

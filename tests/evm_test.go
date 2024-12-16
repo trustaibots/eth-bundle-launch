@@ -7,12 +7,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/umbracle/minimal/chain"
-	"github.com/umbracle/minimal/state"
+	"github.com/umbracle/fastrlp"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/0xPolygon/minimal/chain"
+	"github.com/0xPolygon/minimal/helper/hex"
+	"github.com/0xPolygon/minimal/helper/keccak"
+	"github.com/0xPolygon/minimal/state"
+	"github.com/0xPolygon/minimal/state/runtime"
+	"github.com/0xPolygon/minimal/state/runtime/evm"
+	"github.com/0xPolygon/minimal/types"
+
+	"github.com/0xPolygon/minimal/crypto"
 )
 
 var mainnetChainConfig = chain.Params{
@@ -35,45 +40,35 @@ type VMCase struct {
 	Logs string `json:"logs"`
 	Out  string `json:"out"`
 
-	Post chain.GenesisAlloc `json:"post"`
-	Pre  chain.GenesisAlloc `json:"pre"`
+	Post map[types.Address]*chain.GenesisAccount `json:"post"`
+	Pre  map[types.Address]*chain.GenesisAccount `json:"pre"`
 }
-
-// NOTE: maybe we can just test the EVM here without the executor
 
 func testVMCase(t *testing.T, name string, c *VMCase) {
 	env := c.Env.ToEnv(t)
-	env.GasPrice = c.Exec.GasPrice
+	env.GasPrice = types.BytesToHash(c.Exec.GasPrice.Bytes())
+	env.Origin = c.Exec.Origin
 
-	initialCall := true
-	canTransfer := func(txn *state.Txn, address common.Address, amount *big.Int) bool {
-		if initialCall {
-			initialCall = false
-			return true
-		}
-		return state.CanTransfer(txn, address, amount)
+	s, _, root := buildState(t, c.Pre)
+
+	config := mainnetChainConfig.Forks.At(uint64(env.Number))
+
+	executor := state.NewExecutor(&mainnetChainConfig, s)
+	executor.GetHash = func(*types.Header) func(i uint64) types.Hash {
+		return vmTestBlockHash
 	}
 
-	transfer := func(state *state.Txn, from, to common.Address, amount *big.Int) error {
-		return nil
-	}
+	e, _ := executor.BeginTxn(root, c.Env.ToHeader(t), env.Coinbase)
+	ctx := e.ContextPtr()
+	ctx.GasPrice = types.BytesToHash(env.GasPrice.Bytes())
+	ctx.Origin = env.Origin
 
-	s, snap, _ := buildState(t, c.Pre)
-	// txn := s.Txn()
-	txn := state.NewTxn(s, snap)
+	evmR := evm.NewEVM()
 
-	/*
-		evm := evm.NewEVM(txn, env, mainnetChainConfig.Forks.At(env.Number.Uint64()), chain.GasTableHomestead, vmTestBlockHash)
-		contract := runtime.NewContract(c.Exec.Caller, c.Exec.Caller, c.Exec.Address, c.Exec.Value, c.Exec.GasLimit, c.Exec.Data)
+	code := e.GetCode(c.Exec.Address)
+	contract := runtime.NewContractCall(1, c.Exec.Caller, c.Exec.Caller, c.Exec.Address, c.Exec.Value, c.Exec.GasLimit, code, c.Exec.Data)
 
-		ret, gas, err := evm.Run(contract)
-	*/
-
-	e := state.NewExecutor(txn, env, mainnetChainConfig.Forks.At(env.Number.Uint64()), chain.GasTableHomestead, vmTestBlockHash)
-	e.CanTransfer = canTransfer
-	e.Transfer = transfer
-
-	ret, gas, err := e.Call2(c.Exec.Caller, c.Exec.Address, c.Exec.Data, c.Exec.Value, c.Exec.GasLimit)
+	ret, gas, err := evmR.Run(contract, e, &config)
 
 	if c.Gas == "" {
 		if err == nil {
@@ -89,12 +84,14 @@ func testVMCase(t *testing.T, name string, c *VMCase) {
 	if c.Out == "" {
 		c.Out = "0x"
 	}
-	if ret := hexutil.Encode(ret); ret != c.Out {
+	if ret := hex.EncodeToHex(ret); ret != c.Out {
 		t.Fatalf("return mismatch: got %s, want %s", ret, c.Out)
 	}
 
+	txn := e.Txn()
+
 	// check logs
-	if logs := rlpHash(txn.Logs()); logs != common.HexToHash(c.Logs) {
+	if logs := rlpHashLogs(txn.Logs()); logs != types.StringToHash(c.Logs) {
 		t.Fatalf("logs hash mismatch: got %x, want %x", logs, c.Logs)
 	}
 
@@ -102,7 +99,7 @@ func testVMCase(t *testing.T, name string, c *VMCase) {
 	for addr, alloc := range c.Post {
 		for key, val := range alloc.Storage {
 			if have := txn.GetState(addr, key); have != val {
-				t.Fatalf("wrong storage value at %x:\n  got  %x\n  want %x", key, have, val)
+				t.Fatalf("wrong storage value at %s:\n  got  %s\n  want %s\n at address %s", key, have, val, addr)
 			}
 		}
 	}
@@ -113,6 +110,18 @@ func testVMCase(t *testing.T, name string, c *VMCase) {
 	}
 }
 
+func rlpHashLogs(logs []*types.Log) (res types.Hash) {
+	r := &types.Receipt{
+		Logs: logs,
+	}
+
+	ar := &fastrlp.Arena{}
+	v := r.MarshalLogsWith(ar)
+
+	keccak.Keccak256Rlp(res[:0], v)
+	return
+}
+
 func TestEVM(t *testing.T) {
 	folders, err := listFolders(vmTests)
 	if err != nil {
@@ -121,6 +130,8 @@ func TestEVM(t *testing.T) {
 
 	long := []string{
 		"loop-",
+		"gasprice",
+		"origin",
 	}
 
 	for _, folder := range folders {
@@ -157,6 +168,6 @@ func TestEVM(t *testing.T) {
 	}
 }
 
-func vmTestBlockHash(n uint64) common.Hash {
-	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+func vmTestBlockHash(n uint64) types.Hash {
+	return types.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
 }
