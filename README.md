@@ -12,10 +12,10 @@ The project has two main components, one is the script and another is the smart 
 
 ### Steps to Customize the Smart Contract:
 
-Navigate to either contracts/contract-mainnet.sol or contracts/contract-sepolia.sol, depending on your target network:
+Navigate to either ```contracts/contract-mainnet.sol``` or ```contracts/contract-sepolia.sol```, depending on your target network:
 
-- contract-mainnet.sol: Contract for Ethereum Mainnet
-- contract-sepolia.sol: Contract for Ethereum Sepolia Testnet
+- ```contract-mainnet.sol```: Contract for Ethereum Mainnet
+- ```contract-sepolia.sol```: Contract for Ethereum Sepolia Testnet
 
 The only difference between these contracts is the Uniswap V2 router address specified in the code.
 Customize the contract as needed to fit your requirements.
@@ -45,6 +45,7 @@ apt install python3
 
 - Modify parameters
 
+```
 // Parameters in calculate_eth_for_wallets.py
 ...
 initial_eth = 2.0	// ETHs in initial liquidity 
@@ -52,6 +53,7 @@ initial_tokens = 100    // Tokens in initial liquidity (100 is fine, no need to 
 num_wallets = 50 	// Wallet count to be used as buyers
 target_percentage = 80  // Token hold percentage by sniping
 ...
+```
 
 - Execute the python script
 
@@ -74,7 +76,7 @@ Total ETH required by all wallets: 8.0000 ETH
 
 ### Configure 
 
-Navigate src/config.ts and configure the script
+Navigate ```src/config.ts``` and configure the script
 
 ```ts
 export const MAINNET_RPC= "https://boldest-bold-uranium.quiknode.pro/a5e9ce66d6648e49889274a783acd07aebcc02bc/"
@@ -157,18 +159,15 @@ try {
 
 Always double-check that the ABI (```abi/token-abi.json```) is updated to reflect any changes in the contract before proceeding.
 
-# Donate for further updates
+# Donate us for further updates
 
 Your support helps us continue improving this project and developing innovative solutions for the community. If you’d like to contribute, donations are warmly welcomed at the following wallet addresses:
 
-ERC-20 / BEP-20 (EVM Compatible Wallets):
-Wallet Address: ```0x782819b6564B13e4d8b70165CA2f3E212a6a0C2b```
+- ERC-20 / BEP-20 (EVM Compatible Wallets): ```0x782819b6564B13e4d8b70165CA2f3E212a6a0C2b```
 
-TRC-20 (Tron Wallet):
-Wallet Address: ```TG1YC57m8G5VGHRgmMmfJ96N7tUp9DU8pS```
+- TRC-20 (Tron Wallet): ```TG1YC57m8G5VGHRgmMmfJ96N7tUp9DU8pS```
 
-Solana Wallet:
-Wallet Address: ```HM2Yw3Zb1diPkMVhEttCHhEn9W75gzbZUyMaV6t8aWVr```
+- Solana Wallet: ```HM2Yw3Zb1diPkMVhEttCHhEn9W75gzbZUyMaV6t8aWVr```
 
 Your generosity will play a crucial role in supporting ongoing development, introducing new features, and enhancing the documentation for this project. Thank you for considering a donation and contributing to our progress!
 
@@ -180,7 +179,7 @@ Feel free to reach out to our team on [Telegram](https://t.me/trustaibotsdevteam
 
 # Author
 
-[Dev Team](https://github.com/trustaibots)
-Telegram: https://t.me/trustaibotsdevteam
-Website: https://trustaibots.com
+- Github: [Dev Team](https://github.com/trustaibots)
+- Telegram: https://t.me/trustaibotsdevteam
+- Website: https://trustaibots.com
 
