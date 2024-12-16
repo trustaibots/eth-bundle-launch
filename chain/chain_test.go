@@ -8,23 +8,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/0xPolygon/minimal/types"
 )
 
-var emptyAddr common.Address
+var emptyAddr types.Address
 
-func addr(str string) common.Address {
-	return common.HexToAddress(str)
+func addr(str string) types.Address {
+	return types.StringToAddress(str)
 }
 
-func hash(str string) common.Hash {
-	return common.HexToHash(str)
+func hash(str string) types.Hash {
+	return types.StringToHash(str)
 }
 
 func TestGenesisAlloc(t *testing.T) {
 	cases := []struct {
 		input  string
-		output GenesisAlloc
+		output map[types.Address]GenesisAccount
 	}{
 		{
 			input: `{
@@ -32,7 +32,7 @@ func TestGenesisAlloc(t *testing.T) {
 					"balance": "0x11"
 				}
 			}`,
-			output: GenesisAlloc{
+			output: map[types.Address]GenesisAccount{
 				emptyAddr: GenesisAccount{
 					Balance: big.NewInt(17),
 				},
@@ -49,11 +49,11 @@ func TestGenesisAlloc(t *testing.T) {
 					}
 				}
 			}`,
-			output: GenesisAlloc{
+			output: map[types.Address]GenesisAccount{
 				emptyAddr: GenesisAccount{
 					Balance: big.NewInt(17),
 					Nonce:   256,
-					Storage: map[common.Hash]common.Hash{
+					Storage: map[types.Hash]types.Hash{
 						hash("1"): hash("3"),
 						hash("2"): hash("4"),
 					},
@@ -69,7 +69,7 @@ func TestGenesisAlloc(t *testing.T) {
 					"balance": "0x12"
 				}
 			}`,
-			output: GenesisAlloc{
+			output: map[types.Address]GenesisAccount{
 				addr("0"): GenesisAccount{
 					Balance: big.NewInt(17),
 				},
@@ -78,35 +78,11 @@ func TestGenesisAlloc(t *testing.T) {
 				},
 			},
 		},
-		{
-			input: `{
-					"0x0000000000000000000000000000000000000000": {
-						"builtin": {
-							"name": "precompiled1",
-							"activate_at": 10,
-							"pricing": {
-								"base": 11
-							}
-						}
-					}
-				}`,
-			output: GenesisAlloc{
-				addr("0"): GenesisAccount{
-					Builtin: &Builtin{
-						Name:       "precompiled1",
-						ActivateAt: 10,
-						Pricing: map[string]uint64{
-							"base": 11,
-						},
-					},
-				},
-			},
-		},
 	}
 
 	for _, c := range cases {
 		t.Run("", func(t *testing.T) {
-			var dec GenesisAlloc
+			var dec map[types.Address]GenesisAccount
 			if err := json.Unmarshal([]byte(c.input), &dec); err != nil {
 				if c.output != nil {
 					t.Fatal(err)
@@ -118,7 +94,7 @@ func TestGenesisAlloc(t *testing.T) {
 	}
 }
 
-func TestGenesis(t *testing.T) {
+func TestGenesisX(t *testing.T) {
 	cases := []struct {
 		input  string
 		output *Genesis
@@ -137,13 +113,13 @@ func TestGenesis(t *testing.T) {
 				}
 			}`,
 			output: &Genesis{
-				Difficulty: big.NewInt(18),
+				Difficulty: 18,
 				GasLimit:   17,
-				Alloc: GenesisAlloc{
-					emptyAddr: GenesisAccount{
+				Alloc: map[types.Address]*GenesisAccount{
+					emptyAddr: {
 						Balance: big.NewInt(17),
 					},
-					addr("1"): GenesisAccount{
+					addr("1"): {
 						Balance: big.NewInt(18),
 					},
 				},

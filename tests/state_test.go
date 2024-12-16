@@ -8,21 +8,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/umbracle/minimal/blockchain"
-	"github.com/umbracle/minimal/chain"
-	"github.com/umbracle/minimal/state"
+	"github.com/0xPolygon/minimal/chain"
+	"github.com/0xPolygon/minimal/helper/hex"
+	"github.com/0xPolygon/minimal/state"
+	"github.com/0xPolygon/minimal/state/runtime/evm"
+	"github.com/0xPolygon/minimal/state/runtime/precompiled"
+	"github.com/0xPolygon/minimal/types"
 )
 
-var stateTests = "GeneralStateTests"
+var (
+	stateTests       = "GeneralStateTests"
+	legacyStateTests = "LegacyTests/Constantinople/GeneralStateTests"
+)
 
 type stateCase struct {
-	Info        *info                `json:"_info"`
-	Env         *env                 `json:"env"`
-	Pre         chain.GenesisAlloc   `json:"pre"`
-	Post        map[string]postState `json:"post"`
-	Transaction *stTransaction       `json:"transaction"`
+	Info        *info                                   `json:"_info"`
+	Env         *env                                    `json:"env"`
+	Pre         map[types.Address]*chain.GenesisAccount `json:"pre"`
+	Post        map[string]postState                    `json:"post"`
+	Transaction *stTransaction                          `json:"transaction"`
 }
+
+var ripemd = types.StringToAddress("0000000000000000000000000000000000000003")
 
 func RunSpecificTest(file string, t *testing.T, c stateCase, name, fork string, index int, p postEntry) {
 	config, ok := Forks[fork]
@@ -30,41 +37,46 @@ func RunSpecificTest(file string, t *testing.T, c stateCase, name, fork string, 
 		t.Fatalf("config %s not found", fork)
 	}
 
-	builtins := buildBuiltins(t, config)
 	env := c.Env.ToEnv(t)
 
 	msg, err := c.Transaction.At(p.Indexes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.GasPrice = msg.GasPrice()
 
-	s, snap, _ := buildState(t, c.Pre)
+	s, _, pastRoot := buildState(t, c.Pre)
+	forks := config.At(uint64(env.Number))
 
-	forks := config.At(env.Number.Uint64())
-	gasTable := config.GasTable(env.Number)
+	xxx := state.NewExecutor(&chain.Params{Forks: config, ChainID: 1}, s)
+	xxx.SetRuntime(precompiled.NewPrecompiled())
+	xxx.SetRuntime(evm.NewEVM())
 
-	var root []byte
+	xxx.PostHook = func(t *state.Transition) {
+		if name == "failed_tx_xcf416c53" {
+			// create the account
+			t.Txn().TouchAccount(ripemd)
+			// now remove it
+			t.Txn().Suicide(ripemd)
+		}
+	}
+	xxx.GetHash = func(*types.Header) func(i uint64) types.Hash {
+		return vmTestBlockHash
+	}
 
-	// txn := s.Txn()
-	txn := state.NewTxn(s, snap)
+	executor, _ := xxx.BeginTxn(pastRoot, c.Env.ToHeader(t), env.Coinbase)
+	executor.Apply(msg) //nolint:errcheck
 
-	gasPool := blockchain.NewGasPool(env.GasLimit.Uint64())
-
-	executor := state.NewExecutor(txn, env, forks, gasTable, vmTestBlockHash)
-
-	_, _, err = executor.Apply(txn, msg, env, gasTable, forks, vmTestBlockHash, gasPool, false, builtins)
+	txn := executor.Txn()
 
 	// mining rewards
 	txn.AddSealingReward(env.Coinbase, big.NewInt(0))
 
-	_, root = txn.Commit(forks.EIP158)
-
+	_, root := txn.Commit(forks.EIP158)
 	if !bytes.Equal(root, p.Root.Bytes()) {
-		t.Fatalf("root mismatch (%s %s %d): expected %s but found %s", name, fork, index, p.Root.String(), hexutil.Encode(root))
+		t.Fatalf("root mismatch (%s %s %s %d): expected %s but found %s", file, name, fork, index, p.Root.String(), hex.EncodeToHex(root))
 	}
 
-	if logs := rlpHash(txn.Logs()); logs != p.Logs {
+	if logs := rlpHashLogs(txn.Logs()); logs != p.Logs {
 		t.Fatalf("logs mismatch (%s, %s %d): expected %s but found %s", name, fork, index, p.Logs.String(), logs.String())
 	}
 }
@@ -75,14 +87,16 @@ func TestState(t *testing.T) {
 		"static_Return50000",
 		"static_Call1MB",
 		"stQuadraticComplexityTest",
+		"stTimeConsuming",
 	}
 
 	skip := []string{
-		"failed_tx_xcf416c53",
-		"sstore_combinations_initial",
+		"RevertPrecompiledTouch",
 	}
 
-	folders, err := listFolders(stateTests)
+	// There are two folders in spec tests, one for the current tests for the Istanbul fork
+	// and one for the legacy tests for the other forks
+	folders, err := listFolders(stateTests, legacyStateTests)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,19 +1,20 @@
-package trie
+package itrie
 
 import (
 	"fmt"
-	"log"
-	"os"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/0xPolygon/minimal/helper/hex"
+	"github.com/0xPolygon/minimal/types"
+	"github.com/hashicorp/go-hclog"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/umbracle/fastrlp"
 )
 
+var parserPool fastrlp.ParserPool
+
 var (
-	// CODE is the code prefix
-	CODE = []byte("code")
+	// codePrefix is the code prefix for leveldb
+	codePrefix = []byte("code")
 )
 
 type Batch interface {
@@ -26,8 +27,8 @@ type Storage interface {
 	Put(k, v []byte)
 	Get(k []byte) ([]byte, bool)
 	Batch() Batch
-	SetCode(hash common.Hash, code []byte)
-	GetCode(hash common.Hash) ([]byte, bool)
+	SetCode(hash types.Hash, code []byte)
+	GetCode(hash types.Hash) ([]byte, bool)
 }
 
 // KVStorage is a k/v storage on memory using leveldb
@@ -45,16 +46,16 @@ func (b *KVBatch) Put(k, v []byte) {
 	b.batch.Put(k, v)
 }
 
-func (kv *KVStorage) SetCode(hash common.Hash, code []byte) {
-	kv.Put(append(CODE, hash.Bytes()...), code)
-}
-
-func (kv *KVStorage) GetCode(hash common.Hash) ([]byte, bool) {
-	return kv.Get(append(CODE, hash.Bytes()...))
-}
-
 func (b *KVBatch) Write() {
 	b.db.Write(b.batch, nil)
+}
+
+func (kv *KVStorage) SetCode(hash types.Hash, code []byte) {
+	kv.Put(append(codePrefix, hash.Bytes()...), code)
+}
+
+func (kv *KVStorage) GetCode(hash types.Hash) ([]byte, bool) {
+	return kv.Get(append(codePrefix, hash.Bytes()...))
 }
 
 func (kv *KVStorage) Batch() Batch {
@@ -77,44 +78,48 @@ func (kv *KVStorage) Get(k []byte) ([]byte, bool) {
 	return data, true
 }
 
-func NewLevelDBStorage(path string, logger *log.Logger) (Storage, error) {
+func NewLevelDBStorage(path string, logger hclog.Logger) (Storage, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err
-	}
-	if logger == nil {
-		logger = log.New(os.Stderr, "", log.LstdFlags)
 	}
 	return &KVStorage{db}, nil
 }
 
 type memStorage struct {
 	db   map[string][]byte
-	code map[common.Hash][]byte
+	code map[string][]byte
 }
 
 type memBatch struct {
 	db *map[string][]byte
 }
 
-func (m *memBatch) Put(p, v []byte) {
-	(*m.db)[hexutil.Encode(p)] = v
-}
-
-func (m *memBatch) Write() {
-}
-
 // NewMemoryStorage creates an inmemory trie storage
 func NewMemoryStorage() Storage {
-	return &memStorage{db: map[string][]byte{}, code: map[common.Hash][]byte{}}
+	return &memStorage{db: map[string][]byte{}, code: map[string][]byte{}}
 }
 
-func (m *memStorage) SetCode(hash common.Hash, code []byte) {
-	m.code[hash] = code
+func (m *memStorage) Put(p []byte, v []byte) {
+	buf := make([]byte, len(v))
+	copy(buf[:], v[:])
+	m.db[hex.EncodeToHex(p)] = buf
 }
 
-func (m *memStorage) GetCode(hash common.Hash) ([]byte, bool) {
-	code, ok := m.code[hash]
+func (m *memStorage) Get(p []byte) ([]byte, bool) {
+	v, ok := m.db[hex.EncodeToHex(p)]
+	if !ok {
+		return []byte{}, false
+	}
+	return v, true
+}
+
+func (m *memStorage) SetCode(hash types.Hash, code []byte) {
+	m.code[hash.String()] = code
+}
+
+func (m *memStorage) GetCode(hash types.Hash) ([]byte, bool) {
+	code, ok := m.code[hash.String()]
 	return code, ok
 }
 
@@ -122,152 +127,100 @@ func (m *memStorage) Batch() Batch {
 	return &memBatch{db: &m.db}
 }
 
-func (m *memStorage) Put(p []byte, v []byte) {
-	m.db[hexutil.Encode(p)] = v
+func (m *memBatch) Put(p, v []byte) {
+	buf := make([]byte, len(v))
+	copy(buf[:], v[:])
+	(*m.db)[hex.EncodeToHex(p)] = buf
 }
 
-func (m *memStorage) Get(p []byte) ([]byte, bool) {
-	v, ok := m.db[hexutil.Encode(p)]
+func (m *memBatch) Write() {
+}
+
+// GetNode retrieves a node from storage
+func GetNode(root []byte, storage Storage) (Node, bool, error) {
+	data, ok := storage.Get(root)
 	if !ok {
-		return []byte{}, false
+		return nil, false, nil
 	}
-	return v, true
+
+	// NOTE. We dont need to make copies of the bytes because the nodes
+	// take the reference from data itself which is a safe copy.
+	p := parserPool.Get()
+	defer parserPool.Put(p)
+
+	v, err := p.Parse(data)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if v.Type() != fastrlp.TypeArray {
+		return nil, false, fmt.Errorf("storage item should be an array")
+	}
+
+	n, err := decodeNode(v, storage)
+	return n, err == nil, err
 }
 
-// DecodeNode decodes bytes to his node representation
-func DecodeNode(storage Storage, hash []byte, data []byte) (*Node, error) {
-	// empty data, just return the node, not sure if this is a special case
-	if len(data) == 0 {
-		return &Node{}, nil
+func decodeNode(v *fastrlp.Value, s Storage) (Node, error) {
+	if v.Type() == fastrlp.TypeBytes {
+		vv := &ValueNode{
+			hash: true,
+		}
+		vv.buf = append(vv.buf[:0], v.Raw()...)
+		return vv, nil
 	}
 
-	elems, _, err := rlp.SplitList(data)
-	if err != nil {
-		return nil, fmt.Errorf("decode error: %v", err)
-	}
+	var err error
 
-	count, _ := rlp.CountValues(elems)
-	if count == 2 {
-		return decodeShort(storage, hash, elems)
-	} else if count == 17 {
-		return decodeFull(storage, hash, elems)
-	}
-
-	return nil, fmt.Errorf("invalid number of list elements: %v", count)
-}
-
-func decodeShort(storage Storage, hash []byte, data []byte) (*Node, error) {
-	kbuf, rest, err := rlp.SplitString(data)
-	if err != nil {
-		return nil, err
-	}
-	key := compactToHex(kbuf)
-
-	if hasTerm(key) {
-		// value node
-		val, _, err := rlp.SplitString(rest)
-		if err != nil {
-			return nil, fmt.Errorf("invalid value node: %v", err)
+	ll := v.Elems()
+	if ll == 2 {
+		key := v.Get(0)
+		if key.Type() != fastrlp.TypeBytes {
+			return nil, fmt.Errorf("short key expected to be bytes")
 		}
 
-		h := make([]byte, len(hash))
-		copy(h[:], hash[:])
-
-		n := &Node{
-			prefix: key,
-			leaf: &leafNode{
-				key: append(h, key...),
-				val: val,
-			},
+		// this can be either an array (extension node)
+		// or bytes (leaf node)
+		nc := &ShortNode{}
+		nc.key = compactToHex(key.Raw())
+		if hasTerm(nc.key) {
+			// value node
+			if v.Get(1).Type() != fastrlp.TypeBytes {
+				return nil, fmt.Errorf("short leaf value expected to be bytes")
+			}
+			vv := &ValueNode{}
+			vv.buf = append(vv.buf, v.Get(1).Raw()...)
+			nc.child = vv
+		} else {
+			nc.child, err = decodeNode(v.Get(1), s)
+			if err != nil {
+				return nil, err
+			}
 		}
-		return n, nil
-	}
-	r, _, err := decodeRef(storage, append(hash, key...), rest)
-	if err != nil {
-		return nil, err
-	}
-	r.prefix = key
-	return r, nil
-}
-
-func decodeFull(storage Storage, hash []byte, data []byte) (*Node, error) {
-	edges := [17]*Node{}
-
-	h := make([]byte, len(hash))
-	copy(h[:], hash[:])
-
-	for i := 0; i < 16; i++ {
-		n, rest, err := decodeRef(storage, append(hash, []byte{byte(i)}...), data)
-		if err != nil {
-			return nil, err
-		}
-		if n != nil {
-			n.prefix = append([]byte{byte(i)}, n.prefix...)
-		}
-		edges[i] = n
-		data = rest
-	}
-
-	// value node
-	val, _, err := rlp.SplitString(data)
-	if err != nil {
-		return nil, err
-	}
-	if len(val) > 0 {
-		edges[16] = &Node{
-			prefix: []byte{0x10},
-			leaf: &leafNode{
-				key: append(h, []byte{0x10}...),
-				val: val,
-			},
-		}
-	}
-
-	n := &Node{
-		edges: edges,
-	}
-	return n, nil
-}
-
-const hashLen = len(common.Hash{})
-
-func decodeRef(storage Storage, hash []byte, buf []byte) (*Node, []byte, error) {
-	kind, val, rest, err := rlp.Split(buf)
-	if err != nil {
-		return nil, buf, err
-	}
-	switch {
-	case kind == rlp.List:
-		// 'embedded' node
-		if size := len(buf) - len(rest); size > hashLen {
-			err := fmt.Errorf("oversized embedded node (size is %d bytes, want size < %d)", size, hashLen)
-			return nil, buf, err
-		}
-		n, err := DecodeNode(storage, hash, buf)
-		return n, rest, err
-	case kind == rlp.String && len(val) == 0:
-		// empty node
-		return nil, rest, nil
-	case kind == rlp.String && len(val) == 32:
-
-		// NOTE, it fully expands all the internal nodes
-		// only for testing now.
-
-		realVal, ok := storage.Get(val)
-		if !ok {
-			return nil, nil, fmt.Errorf("Value could not be expanded")
+		return nc, nil
+	} else if ll == 17 {
+		// full node
+		nc := &FullNode{}
+		for i := 0; i < 16; i++ {
+			if v.Get(i).Type() == fastrlp.TypeBytes && len(v.Get(i).Raw()) == 0 {
+				// empty
+				continue
+			}
+			nc.children[i], err = decodeNode(v.Get(i), s)
+			if err != nil {
+				return nil, err
+			}
 		}
 
-		n, err := DecodeNode(storage, hash, realVal)
-
-		// fmt.Println("-- val --")
-		// fmt.Println(val)
-
-		n.hash = val
-		return n, rest, err
-
-		// return &Node{leaf: &leafNode{val: val}}, rest, nil
-	default:
-		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 or 32)", len(val))
+		if v.Get(16).Type() != fastrlp.TypeBytes {
+			return nil, fmt.Errorf("full node value expected to be bytes")
+		}
+		if len(v.Get(16).Raw()) != 0 {
+			vv := &ValueNode{}
+			vv.buf = append(vv.buf[:0], v.Get(16).Raw()...)
+			nc.value = vv
+		}
+		return nc, nil
 	}
+	return nil, fmt.Errorf("node has incorrect number of leafs")
 }

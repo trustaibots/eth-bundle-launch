@@ -6,66 +6,25 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/umbracle/minimal/chain"
+	"github.com/stretchr/testify/assert"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/0xPolygon/minimal/blockchain/storage"
+	"github.com/0xPolygon/minimal/blockchain/storage/memory"
+	"github.com/0xPolygon/minimal/types"
 )
 
 func TestGenesis(t *testing.T) {
 	b := NewTestBlockchain(t, nil)
 
-	// no genesis block yet
-	if _, ok := b.Header(); !ok {
-		t.Fatal("it shoudl be empty")
-	}
-
 	// add genesis block
-	genesis := &types.Header{Difficulty: big.NewInt(1), Number: big.NewInt(0)}
-	if err := b.WriteHeaderGenesis(genesis); err != nil {
-		t.Fatal(err)
-	}
+	genesis := &types.Header{Difficulty: 1, Number: 0}
+	genesis.ComputeHash()
 
-	header, _ := b.Header()
-	if header.Hash() != genesis.Hash() {
-		t.Fatal("bad")
-	}
-}
+	_, err := b.advanceHead(genesis)
+	assert.NoError(t, err)
 
-func TestChainGenesis(t *testing.T) {
-	// Test chain genesis from json files
-	cases := []struct {
-		Name string
-		Root string
-		Hash string
-	}{
-		{
-			Name: "foundation",
-			Root: "0xd7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544",
-			Hash: "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.Name, func(t *testing.T) {
-			genesis, err := chain.ImportFromName(c.Name)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			b := NewTestBlockchain(t, nil)
-			if err := b.WriteGenesis(genesis.Genesis); err != nil {
-				t.Fatal(err)
-			}
-
-			if root := b.genesis.Root.String(); root != c.Root {
-				t.Fatalf("Expected state root '%s' but found '%s'", c.Root, root)
-			}
-			if hash := b.genesis.Hash().String(); hash != c.Hash {
-				t.Fatalf("Expected hash '%s' but found '%s'", c.Hash, hash)
-			}
-		})
-	}
+	header := b.Header()
+	assert.Equal(t, header.Hash, genesis.Hash)
 }
 
 type dummyChain struct {
@@ -77,21 +36,23 @@ func (c *dummyChain) add(h *header) error {
 		return fmt.Errorf("hash already imported")
 	}
 
-	var parent common.Hash
+	var parent types.Hash
 	if h.number != 0 {
 		p, ok := c.headers[h.parent]
 		if !ok {
 			return fmt.Errorf("parent not found %v", h.parent)
 		}
-		parent = p.Hash()
+		parent = p.Hash
 	}
 
-	c.headers[h.hash] = &types.Header{
+	hh := &types.Header{
 		ParentHash: parent,
-		Number:     big.NewInt(int64(h.number)),
-		Difficulty: big.NewInt(int64(h.diff)),
-		Extra:      []byte{h.hash},
+		Number:     h.number,
+		Difficulty: h.diff,
+		ExtraData:  []byte{h.hash},
 	}
+	hh.ComputeHash()
+	c.headers[h.hash] = hh
 	return nil
 }
 
@@ -128,9 +89,20 @@ func mock(number byte) *header {
 }
 
 func TestInsertHeaders(t *testing.T) {
+
+	type evnt struct {
+		NewChain []*header
+		OldChain []*header
+		Diff     *big.Int
+	}
+	type headerEvnt struct {
+		header *header
+		event  *evnt
+	}
+
 	var cases = []struct {
 		Name    string
-		History []*header
+		History []*headerEvnt
 		Head    *header
 		Forks   []*header
 		Chain   []*header
@@ -138,21 +110,41 @@ func TestInsertHeaders(t *testing.T) {
 	}{
 		{
 			Name: "Genesis",
-			History: []*header{
-				mock(0x0),
+			History: []*headerEvnt{
+				{
+					header: mock(0x0),
+				},
 			},
 			Head: mock(0x0),
 			Chain: []*header{
 				mock(0x0),
 			},
-			TD: 1,
+			TD: 0,
 		},
 		{
 			Name: "Linear",
-			History: []*header{
-				mock(0x0),
-				mock(0x1),
-				mock(0x2),
+			History: []*headerEvnt{
+				{
+					header: mock(0x0),
+				},
+				{
+					header: mock(0x1),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x1),
+						},
+						Diff: big.NewInt(1),
+					},
+				},
+				{
+					header: mock(0x2),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x2),
+						},
+						Diff: big.NewInt(3),
+					},
+				},
 			},
 			Head: mock(0x2),
 			Chain: []*header{
@@ -160,15 +152,41 @@ func TestInsertHeaders(t *testing.T) {
 				mock(0x1),
 				mock(0x2),
 			},
-			TD: 1 + 1 + 2,
+			TD: 0 + 1 + 2,
 		},
 		{
 			Name: "Keep block with higher difficulty",
-			History: []*header{
-				mock(0x0),
-				mock(0x1),
-				mock(0x3).Parent(0x1).Diff(5),
-				mock(0x2).Parent(0x1).Diff(3),
+			History: []*headerEvnt{
+				{
+					header: mock(0x0),
+				},
+				{
+					header: mock(0x1),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x1),
+						},
+						Diff: big.NewInt(1),
+					},
+				},
+				{
+					header: mock(0x3).Parent(0x1).Diff(5),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x3).Parent(0x1).Diff(5),
+						},
+						Diff: big.NewInt(6),
+					},
+				},
+				{
+					// This block has lower difficulty than the current chain (fork)
+					header: mock(0x2).Parent(0x1).Diff(3),
+					event: &evnt{
+						OldChain: []*header{
+							mock(0x2).Parent(0x1).Diff(3),
+						},
+					},
+				},
 			},
 			Head:  mock(0x3),
 			Forks: []*header{mock(0x2)},
@@ -177,18 +195,75 @@ func TestInsertHeaders(t *testing.T) {
 				mock(0x1),
 				mock(0x3).Parent(0x1).Diff(5),
 			},
-			TD: 1 + 1 + 5,
+			TD: 0 + 1 + 5,
 		},
 		{
 			Name: "Reorg",
-			History: []*header{
-				mock(0x0),
-				mock(0x1),
-				mock(0x2),
-				mock(0x3),
-				mock(0x4).Parent(0x1).Diff(10).Number(2),
-				mock(0x5).Parent(0x4).Diff(11).Number(3),
-				mock(0x6).Parent(0x3).Number(4),
+			History: []*headerEvnt{
+				{
+					header: mock(0x0),
+				},
+				{
+					header: mock(0x1),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x1),
+						},
+						Diff: big.NewInt(1),
+					},
+				},
+				{
+					header: mock(0x2),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x2),
+						},
+						Diff: big.NewInt(1 + 2),
+					},
+				},
+				{
+					header: mock(0x3),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x3),
+						},
+						Diff: big.NewInt(1 + 2 + 3),
+					},
+				},
+				{
+					// First reorg
+					header: mock(0x4).Parent(0x1).Diff(10).Number(2),
+					event: &evnt{
+						// add block 4
+						NewChain: []*header{
+							mock(0x4).Parent(0x1).Diff(10).Number(2),
+						},
+						// remove block 2 and 3
+						OldChain: []*header{
+							mock(0x2),
+							mock(0x3),
+						},
+						Diff: big.NewInt(1 + 10),
+					},
+				},
+				{
+					header: mock(0x5).Parent(0x4).Diff(11).Number(3),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x5).Parent(0x4).Diff(11).Number(3),
+						},
+						Diff: big.NewInt(1 + 10 + 11),
+					},
+				},
+				{
+					header: mock(0x6).Parent(0x3).Number(4),
+					event: &evnt{
+						// lower difficulty, its a fork
+						OldChain: []*header{
+							mock(0x6).Parent(0x3).Number(4),
+						},
+					},
+				},
 			},
 			Head:  mock(0x5),
 			Forks: []*header{mock(0x6)},
@@ -198,18 +273,72 @@ func TestInsertHeaders(t *testing.T) {
 				mock(0x4).Parent(0x1).Diff(10).Number(2),
 				mock(0x5).Parent(0x4).Diff(11).Number(3),
 			},
-			TD: 1 + 1 + 10 + 11,
+			TD: 0 + 1 + 10 + 11,
 		},
 		{
 			Name: "Forks in reorgs",
-			History: []*header{
-				mock(0x0),
-				mock(0x1),
-				mock(0x2),
-				mock(0x3), // fork because of the 0x4 reorg
-				mock(0x4).Parent(0x2).Diff(11),
-				mock(0x5).Parent(0x3),         // replace 0x3 as header fork
-				mock(0x6).Parent(0x2).Diff(5), // lower fork in 0x1
+			History: []*headerEvnt{
+				{
+					header: mock(0x0),
+				},
+				{
+					header: mock(0x1),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x1),
+						},
+						Diff: big.NewInt(1),
+					},
+				},
+				{
+					header: mock(0x2),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x2),
+						},
+						Diff: big.NewInt(1 + 2),
+					},
+				},
+				{
+					header: mock(0x3),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x3),
+						},
+						Diff: big.NewInt(1 + 2 + 3),
+					},
+				},
+				{
+					// fork 1. 0x1 -> 0x2 -> 0x4
+					header: mock(0x4).Parent(0x2).Diff(11),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x4).Parent(0x2).Diff(11),
+						},
+						OldChain: []*header{
+							mock(0x3),
+						},
+						Diff: big.NewInt(1 + 2 + 11),
+					},
+				},
+				{
+					// fork 2. 0x1 -> 0x2 -> 0x3 -> 0x5
+					header: mock(0x5).Parent(0x3),
+					event: &evnt{
+						OldChain: []*header{
+							mock(0x5).Parent(0x3),
+						},
+					},
+				},
+				{
+					// fork 3. 0x1 -> 0x2 -> 0x6
+					header: mock(0x6).Parent(0x2).Diff(5),
+					event: &evnt{
+						OldChain: []*header{
+							mock(0x6).Parent(0x2).Diff(5),
+						},
+					},
+				},
 			},
 			Head:  mock(0x4),
 			Forks: []*header{mock(0x5), mock(0x6)},
@@ -219,59 +348,152 @@ func TestInsertHeaders(t *testing.T) {
 				mock(0x2),
 				mock(0x4).Parent(0x2).Diff(11),
 			},
-			TD: 1 + 1 + 2 + 11,
+			TD: 0 + 1 + 2 + 11,
+		},
+		{
+			Name: "Head from old long fork",
+			History: []*headerEvnt{
+				{
+					header: mock(0x0),
+				},
+				{
+					header: mock(0x1),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x1),
+						},
+						Diff: big.NewInt(1),
+					},
+				},
+				{
+					header: mock(0x2),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x2),
+						},
+						Diff: big.NewInt(1 + 2),
+					},
+				},
+				{
+					// fork 1.
+					header: mock(0x3).Parent(0x0).Diff(5),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x3).Parent(0x0).Diff(5),
+						},
+						OldChain: []*header{
+							mock(0x1),
+							mock(0x2),
+						},
+						Diff: big.NewInt(0 + 5),
+					},
+				},
+				{
+					// Add back the 0x2 fork
+					header: mock(0x4).Parent(0x2).Diff(10),
+					event: &evnt{
+						NewChain: []*header{
+							mock(0x4).Parent(0x2).Diff(10),
+							mock(0x2),
+							mock(0x1),
+						},
+						OldChain: []*header{
+							mock(0x3).Parent(0x0).Diff(5),
+						},
+						Diff: big.NewInt(1 + 2 + 10),
+					},
+				},
+			},
+			Head: mock(0x4).Parent(0x2).Diff(10),
+			Forks: []*header{
+				mock(0x2),
+				mock(0x3).Parent(0x0).Diff(5),
+			},
+			Chain: []*header{
+				mock(0x0),
+				mock(0x1),
+				mock(0x2),
+				mock(0x4).Parent(0x2).Diff(10),
+			},
+			TD: 0 + 1 + 2 + 10,
 		},
 	}
 
 	for _, cc := range cases {
-		t.Run(cc.Name, func(tt *testing.T) {
+		t.Run(cc.Name, func(t *testing.T) {
 			b := NewTestBlockchain(t, nil)
 
 			chain := dummyChain{
 				headers: map[byte]*types.Header{},
 			}
 			for _, i := range cc.History {
-				if err := chain.add(i); err != nil {
-					tt.Fatal(err)
+				if err := chain.add(i.header); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			checkEvents := func(a []*header, b []*types.Header) {
+				if len(a) != len(b) {
+					t.Fatal("bad size")
+				}
+				for indx := range a {
+					if chain.headers[a[indx].hash].Hash != b[indx].Hash {
+						t.Fatal("bad")
+					}
 				}
 			}
 
 			// genesis is 0x0
-			if err := b.WriteHeaderGenesis(chain.headers[0x0]); err != nil {
-				tt.Fatal(err)
+			if err := b.writeGenesisImpl(chain.headers[0x0]); err != nil {
+				t.Fatal(err)
 			}
+
+			// we need to subscribe just after the genesis and history
+			sub := b.SubscribeEvents()
 
 			// run the history
 			for i := 1; i < len(cc.History); i++ {
-				if err := b.WriteHeader(chain.headers[cc.History[i].hash]); err != nil {
-					tt.Fatal(err)
+				if err := b.WriteHeaders([]*types.Header{chain.headers[cc.History[i].header.hash]}); err != nil {
+					t.Fatal(err)
+				}
+
+				// get the event
+				evnt := sub.GetEvent()
+				checkEvents(cc.History[i].event.NewChain, evnt.NewChain)
+				checkEvents(cc.History[i].event.OldChain, evnt.OldChain)
+
+				if evnt.Difficulty != nil {
+					if evnt.Difficulty.Cmp(cc.History[i].event.Diff) != 0 {
+						t.Fatal("bad diff in event")
+					}
 				}
 			}
 
-			head, _ := b.Header()
+			head := b.Header()
 
 			expected, ok := chain.headers[cc.Head.hash]
-			if !ok {
-				tt.Fatal("bad")
+			assert.True(t, ok)
+
+			// check that we got the right hash
+			assert.Equal(t, head.Hash, expected.Hash)
+
+			forks, err := b.GetForks()
+			if err != nil && err != storage.ErrNotFound {
+				t.Fatal(err)
 			}
 
-			if head.Hash() != expected.Hash() {
-				tt.Fatal("bad2")
-			}
-
-			forks := b.GetForks()
-			expectedForks := []common.Hash{}
+			expectedForks := []types.Hash{}
 
 			for _, i := range cc.Forks {
-				expectedForks = append(expectedForks, chain.headers[i.hash].Hash())
+				expectedForks = append(expectedForks, chain.headers[i.hash].Hash)
 			}
 
 			if len(forks) != 0 {
 				if len(forks) != len(expectedForks) {
-					tt.Fatalf("forks length dont match, expected %d but found %d", len(expectedForks), len(forks))
+					t.Fatalf("forks length dont match, expected %d but found %d", len(expectedForks), len(forks))
 				} else {
 					if !reflect.DeepEqual(forks, expectedForks) {
-						tt.Fatal("forks dont match")
+						t.Fatal("forks dont match")
 					}
 				}
 			}
@@ -279,18 +501,17 @@ func TestInsertHeaders(t *testing.T) {
 			// Check chain of forks
 			if cc.Chain != nil {
 				for indx, i := range cc.Chain {
-					block, _ := b.GetBlockByNumber(big.NewInt(int64(indx)), true)
-					if block.Hash().String() != chain.headers[i.hash].Hash().String() {
-						tt.Fatal("bad")
+					block, _ := b.GetBlockByNumber(uint64(indx), true)
+					if block.Hash().String() != chain.headers[i.hash].Hash.String() {
+						t.Fatal("bad")
 					}
 				}
 			}
 
-			fmt.Println("-- get total difficulty --")
-			fmt.Println(b.GetChainTD())
-
 			if td, _ := b.GetChainTD(); cc.TD != td.Uint64() {
-				tt.Fatal("bad")
+				fmt.Println(td)
+				fmt.Println(cc.TD)
+				t.Fatal("bad")
 			}
 		})
 	}
@@ -302,46 +523,41 @@ func TestForkUnkwonParents(t *testing.T) {
 	h0 := NewTestHeaderChain(10)
 	h1 := NewTestHeaderFromChain(h0[:5], 10)
 
-	if err := b.WriteHeaderGenesis(h0[0]); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.WriteHeaders(h0[1:]); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.WriteHeader(h1[12]); err != nil {
-		t.Fatal(err)
-	}
+	// Write genesis
+	_, err := b.advanceHead(h0[0])
+	assert.NoError(t, err)
+
+	// Write 10 headers
+	assert.NoError(t, b.WriteHeaders(h0[1:]))
+
+	// Cannot write this header because the father h1[11] is not known
+	assert.Error(t, b.WriteHeadersWithBodies([]*types.Header{h1[12]}))
 }
 
-func TestCommitChain(t *testing.T) {
-	// test if the data written in commitchain is retrieved correctly
+func TestBlockchainWriteBody(t *testing.T) {
+	storage, err := memory.NewMemoryStorage(nil)
+	assert.NoError(t, err)
 
-	headers, blocks, receipts := NewTestBodyChain(2)
-	b := NewTestBlockchain(t, headers)
+	b := &Blockchain{
+		db: storage,
+	}
 
-	if err := b.CommitChain(blocks, receipts); err != nil {
+	block := &types.Block{
+		Header: &types.Header{},
+		Transactions: []*types.Transaction{
+			{
+				Value: big.NewInt(10),
+				V:     1,
+			},
+		},
+	}
+	block.Header.ComputeHash()
+
+	if err := b.writeBody(block); err != nil {
 		t.Fatal(err)
 	}
 
-	for i := 1; i < len(blocks); i++ {
-		block := blocks[i]
-
-		// check blocks
-		i, _ := b.db.ReadBody(block.Hash())
-		if len(i.Transactions) != 1 {
-			t.Fatal("should have 1 tx")
-		}
-		if i.Transactions[0].Nonce() != block.Number().Uint64() {
-			t.Fatal("number is incorrect")
-		}
-
-		// check receipts
-		r := b.db.ReadReceipts(block.Hash())
-		if len(r) != 1 {
-			t.Fatal("should have 1 receipt")
-		}
-		if r[0].TxHash != i.Transactions[0].Hash() {
-			t.Fatal("receipt does not match with transaction")
-		}
-	}
+	body, ok := b.readBody(block.Hash())
+	fmt.Println(body)
+	fmt.Println(ok)
 }

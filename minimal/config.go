@@ -1,35 +1,33 @@
 package minimal
 
 import (
-	"github.com/umbracle/minimal/blockchain/storage"
-	"github.com/umbracle/minimal/chain"
-	"github.com/umbracle/minimal/consensus"
-	"github.com/umbracle/minimal/minimal/keystore"
-	"github.com/umbracle/minimal/network/discovery"
-	"github.com/umbracle/minimal/protocol"
+	"net"
+
+	"github.com/0xPolygon/minimal/chain"
+	"github.com/0xPolygon/minimal/network"
 )
+
+const DefaultGRPCPort int = 9632
+const DefaultJSONRPCPort int = 8545
 
 // Config is used to parametrize the minimal client
 type Config struct {
-	DiscoveryBackends map[string]discovery.Factory
-	DiscoveryEntries  map[string]*Entry
+	Chain *chain.Chain
 
-	ProtocolBackends map[string]protocol.Factory
-	ProtocolEntries  map[string]*Entry
+	JSONRPCAddr *net.TCPAddr
+	GRPCAddr    *net.TCPAddr
+	LibP2PAddr  *net.TCPAddr
 
-	BlockchainBackends map[string]storage.Factory
-	BlockchainEntries  map[string]*Entry
+	Network *network.Config
+	DataDir string
+	Seal    bool
+}
 
-	ConsensusBackends map[string]consensus.Factory
-	ConsensusEntry    *Entry
-
-	Keystore keystore.Keystore
-	Chain    *chain.Chain
-
-	BindAddr string
-	BindPort int
-
-	DataDir     string
-	ServiceName string
-	Seal        bool
+// DefaultConfig returns the default config for JSON-RPC, GRPC (ports) and Networking
+func DefaultConfig() *Config {
+	return &Config{
+		JSONRPCAddr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: DefaultJSONRPCPort},
+		GRPCAddr:    &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: DefaultGRPCPort},
+		Network:     network.DefaultConfig(),
+	}
 }

@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/0xPolygon/minimal/command/util"
 	"github.com/mitchellh/cli"
-	"github.com/umbracle/minimal/command"
 )
 
 func main() {
 	os.Exit(Run(os.Args[1:]))
 }
 
+// Run starts the cli
 func Run(args []string) int {
-	commands := command.Commands()
+	commands := util.Commands()
 
 	cli := &cli.CLI{
-		Name:     "minimal",
+		Name:     "polygon",
 		Args:     args,
 		Commands: commands,
 	}
