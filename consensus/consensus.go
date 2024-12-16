@@ -4,28 +4,27 @@ import (
 	"context"
 	"log"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/umbracle/minimal/chain"
-	"github.com/umbracle/minimal/state"
+	"github.com/0xPolygon/minimal/blockchain"
+	"github.com/0xPolygon/minimal/chain"
+	"github.com/0xPolygon/minimal/network"
+	"github.com/0xPolygon/minimal/state"
+	"github.com/0xPolygon/minimal/txpool"
+	"github.com/0xPolygon/minimal/types"
+	"github.com/hashicorp/go-hclog"
+	"google.golang.org/grpc"
 )
 
-// Consensus is the interface for consensus
+// Consensus is the public interface for consensus mechanism
+// Each consensus mechanism must implement this interface in order to be valid
 type Consensus interface {
 	// VerifyHeader verifies the header is correct
-	VerifyHeader(parent *types.Header, header *types.Header, uncle, seal bool) error
+	VerifyHeader(parent, header *types.Header) error
 
-	// Author checks the author of the header
-	Author(header *types.Header) (common.Address, error)
+	// GetBlockCreator retrieves the block creator (or signer) given the block header
+	GetBlockCreator(header *types.Header) (types.Address, error)
 
-	// Seal seals the block
-	Seal(ctx context.Context, block *types.Block) (*types.Block, error)
-
-	// Prepare runs before processing the head during mining.
-	Prepare(parent *types.Header, header *types.Header) error
-
-	// Finalize runs after the block has been processed
-	Finalize(txn *state.Txn, block *types.Block) error
+	// Start starts the consensus
+	Start() error
 
 	// Close closes the connection
 	Close() error
@@ -39,12 +38,21 @@ type Config struct {
 	// Params are the params of the chain and the consensus
 	Params *chain.Params
 
-	// Specific configuration parameters for the backend
+	// Config defines specific configuration parameters for the backend
 	Config map[string]interface{}
+
+	// Path is the directory path for the consensus protocol tos tore information
+	Path string
 }
 
 // Factory is the factory function to create a discovery backend
-type Factory func(context.Context, *Config) (Consensus, error)
-
-// TODO, remove close method and use the context
-// TODO, move prepare to seal
+type Factory func(
+	context.Context,
+	bool, *Config,
+	*txpool.TxPool,
+	*network.Server,
+	*blockchain.Blockchain,
+	*state.Executor,
+	*grpc.Server,
+	hclog.Logger,
+) (Consensus, error)

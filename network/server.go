@@ -1,458 +1,623 @@
 package network
 
 import (
-	"crypto/ecdsa"
+	"context"
 	"fmt"
-	"log"
 	"net"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/umbracle/minimal/network/transport/rlpx"
-
-	"github.com/umbracle/minimal/helper/enode"
-
-	"github.com/armon/go-metrics"
-
-	"github.com/ferranbt/periodic-dispatcher"
-
-	"github.com/umbracle/minimal/network/common"
-	"github.com/umbracle/minimal/network/discovery"
-	"github.com/umbracle/minimal/protocol"
+	"github.com/0xPolygon/minimal/chain"
+	"github.com/hashicorp/go-hclog"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/event"
+	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
+	noise "github.com/libp2p/go-libp2p-noise"
+	peerstore "github.com/libp2p/go-libp2p-peerstore"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/multiformats/go-multiaddr"
 )
 
-const (
-	peersFile = "peers.json"
-	defaultDialTimeout = 10 * time.Second
-	defaultDialTasks = 15
-)
+const DefaultLibp2pPort int = 1478
 
-// Config is the p2p server configuration
 type Config struct {
-	Name             string
-	DataDir          string
-	BindAddress      string
-	BindPort         int
-	MaxPeers         int
-	Bootnodes        []string
-	DialTasks        int
-	DialBusyInterval time.Duration
+	NoDiscover bool
+	Addr       *net.TCPAddr
+	NatAddr    net.IP
+	DataDir    string
+	MaxPeers   uint64
+	Chain      *chain.Chain
 }
 
-// DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
-	c := &Config{
-		Name:             "Minimal/go1.10.2",
-		BindAddress:      "127.0.0.1",
-		BindPort:         30304,
-		MaxPeers:         10,
-		Bootnodes:        []string{},
-		DialTasks:        defaultDialTasks,
-		DialBusyInterval: 1 * time.Minute,
-	}
-	return c
-}
-
-type EventType int
-
-const (
-	NodeJoin EventType = iota
-	NodeLeave
-	NodeHandshakeFail
-)
-
-func (t EventType) String() string {
-	switch t {
-	case NodeJoin:
-		return "node join"
-	case NodeLeave:
-		return "node leave"
-	case NodeHandshakeFail:
-		return "node handshake failed"
-	default:
-		panic(fmt.Sprintf("unknown event type: %d", t))
+	return &Config{
+		NoDiscover: false,
+		Addr:       &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: DefaultLibp2pPort},
+		MaxPeers:   10,
 	}
 }
 
-type MemberEvent struct {
-	Type EventType
-	Peer *Peer
-}
-
-// Server is the ethereum client
 type Server struct {
-	logger *log.Logger
-	Name   string
-	key    *ecdsa.PrivateKey
+	logger hclog.Logger
+	config *Config
 
-	peersLock sync.Mutex
-	peers     map[string]*Peer
-
-	info *common.Info
-
-	config  *Config
 	closeCh chan struct{}
-	EventCh chan MemberEvent
 
-	// set of pending nodes
-	pendingNodes sync.Map
+	host  host.Host
+	addrs []multiaddr.Multiaddr
 
-	addPeer chan string
+	peers     map[peer.ID]*Peer
+	peersLock sync.Mutex
 
-	dispatcher *periodic.Dispatcher
+	dialQueue *dialQueue
 
-	peerStore *PeerStore
-	listener  net.Listener
-	transport common.Transport
+	identity  *identity
+	discovery *discovery
 
-	Discovery discovery.Backend
-	Enode     *enode.Enode
+	protocols     map[string]Protocol
+	protocolsLock sync.Mutex
 
-	backends []protocol.Backend
+	// pubsub
+	ps *pubsub.PubSub
+
+	joinWatchers     map[peer.ID]chan error
+	joinWatchersLock sync.Mutex
+
+	emitterPeerEvent event.Emitter
 }
 
-// NewServer creates a new node
-func NewServer(name string, key *ecdsa.PrivateKey, config *Config, logger *log.Logger) *Server {
-	enode := &enode.Enode{
-		IP:  net.ParseIP(config.BindAddress),
-		TCP: uint16(config.BindPort),
-		UDP: uint16(config.BindPort),
-		ID:  enode.PubkeyToEnode(&key.PublicKey),
-	}
+type Peer struct {
+	srv *Server
 
-	fmt.Printf("Enode: %s\n", enode.String())
-
-	peersFilePath := filepath.Join(config.DataDir, peersFile)
-
-	s := &Server{
-		Name:         name,
-		key:          key,
-		peers:        map[string]*Peer{},
-		peersLock:    sync.Mutex{},
-		config:       config,
-		logger:       logger,
-		closeCh:      make(chan struct{}),
-		Enode:        enode,
-		EventCh:      make(chan MemberEvent, 20),
-		pendingNodes: sync.Map{},
-		addPeer:      make(chan string, 20),
-		dispatcher:   periodic.NewDispatcher(),
-		peerStore:    NewPeerStore(peersFilePath),
-		backends:     []protocol.Backend{},
-		transport:    &rlpx.Rlpx{},
-	}
-
-	return s
+	Info peer.AddrInfo
 }
 
-func (s *Server) buildInfo() {
-	info := &common.Info{
-		Client: s.Name,
-		Enode:  s.Enode,
+func NewServer(logger hclog.Logger, config *Config) (*Server, error) {
+	logger = logger.Named("network")
+
+	key, err := ReadLibp2pKey(config.DataDir)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, p := range s.backends {
-		proto := p.Protocol()
+	listenAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%d", config.Addr.IP.String(), config.Addr.Port))
+	if err != nil {
+		return nil, err
+	}
 
-		cap := &common.Capability{
-			Protocol: proto,
-			Backend:  p,
+	addrsFactory := func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+		if config.NatAddr != nil {
+			addr, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%d", config.NatAddr.String(), config.Addr.Port))
+
+			if addr != nil {
+				addrs = []multiaddr.Multiaddr{addr}
+			}
 		}
 
-		info.Capabilities = append(info.Capabilities, cap)
+		return addrs
 	}
-	s.info = info
+
+	host, err := libp2p.New(
+		context.Background(),
+		// Use noise as the encryption protocol
+		libp2p.Security(noise.ID, noise.New),
+		libp2p.ListenAddrs(listenAddr),
+		libp2p.AddrsFactory(addrsFactory),
+		libp2p.Identity(key),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create libp2p stack: %v", err)
+	}
+
+	emitter, err := host.EventBus().Emitter(new(PeerEvent))
+	if err != nil {
+		return nil, err
+	}
+
+	srv := &Server{
+		logger:           logger,
+		config:           config,
+		host:             host,
+		addrs:            host.Addrs(),
+		peers:            map[peer.ID]*Peer{},
+		dialQueue:        newDialQueue(),
+		closeCh:          make(chan struct{}),
+		emitterPeerEvent: emitter,
+		protocols:        map[string]Protocol{},
+	}
+
+	// start identity
+	srv.identity = &identity{srv: srv}
+	srv.identity.setup()
+
+	go srv.runDial()
+
+	logger.Info("LibP2P server running", "addr", AddrInfoToString(srv.AddrInfo()))
+
+	if !config.NoDiscover {
+		// start discovery
+		srv.discovery = &discovery{srv: srv}
+		srv.discovery.setup()
+
+		// try to decode the bootnodes
+		bootnodes := []*peer.AddrInfo{}
+		for _, raw := range config.Chain.Bootnodes {
+			node, err := StringToAddrInfo(raw)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse bootnode %s: %v", raw, err)
+			}
+			// add the bootnode to the peerstore
+			srv.host.Peerstore().AddAddr(node.ID, node.Addrs[0], peerstore.AddressTTL)
+			bootnodes = append(bootnodes, node)
+		}
+
+		srv.discovery.setBootnodes(bootnodes)
+	}
+
+	// start gossip protocol
+	ps, err := pubsub.NewGossipSub(context.Background(), host)
+	if err != nil {
+		return nil, err
+	}
+	srv.ps = ps
+
+	go srv.runJoinWatcher()
+
+	// watch for disconnected peers
+	host.Network().Notify(&network.NotifyBundle{
+		DisconnectedF: func(net network.Network, conn network.Conn) {
+			go func() {
+				srv.delPeer(conn.RemotePeer())
+			}()
+		},
+	})
+
+	return srv, nil
 }
 
-// Schedule starts all the tasks once all the protocols have been loaded
-func (s *Server) Schedule() error {
-	// bootstrap peers
-	for _, peer := range s.peerStore.Load() {
-		s.Dial(peer)
+func (s *Server) runDial() {
+	// watch for events of peers included or removed
+	notifyCh := make(chan struct{})
+	err := s.SubscribeFn(func(evnt *PeerEvent) {
+		switch evnt.Type {
+		case PeerEventConnected, PeerEventConnectedFailed, PeerEventDisconnected, PeerEventDialCompleted:
+		default:
+			return
+		}
+
+		select {
+		case notifyCh <- struct{}{}:
+		default:
+		}
+	})
+	if err != nil {
+		s.logger.Error("dial manager failed to subscribe", "err", err)
 	}
 
-	// Create rlpx info
-	s.buildInfo()
+	for {
+		slots := s.numOpenSlots()
 
-	s.transport.Setup(s.key, s.backends, s.info)
+		// TODO: Right now the dial task are done sequentially because Connect
+		// is a blocking request. In the future we should try to make up to
+		// maxDials requests concurrently.
+		for i := int64(0); i < slots; i++ {
+			tt := s.dialQueue.pop()
+			if tt == nil {
+				// dial closed
+				return
+			}
+			s.logger.Debug("dial", "local", s.host.ID(), "addr", tt.addr.String())
 
-	if err := s.setupTransport(); err != nil {
+			if s.isConnected(tt.addr.ID) {
+				// the node is already connected, send an event to wake up
+				// any join watchers
+				s.emitEvent(&PeerEvent{
+					PeerID: tt.addr.ID,
+					Type:   PeerEventDialConnectedNode,
+				})
+			} else {
+				// the connection process is async because it involves connection (here) +
+				// the handshake done in the identity service.
+				if err := s.host.Connect(context.Background(), *tt.addr); err != nil {
+					s.logger.Trace("failed to dial", "addr", tt.addr.String(), "err", err)
+				}
+			}
+		}
+
+		// wait until there is a change in the state of a peer that
+		// might involve a new dial slot available
+		select {
+		case <-notifyCh:
+		case <-s.closeCh:
+			return
+		}
+	}
+}
+
+// PeerEventDialConnectedNode
+func (s *Server) numPeers() int64 {
+	return int64(len(s.peers))
+}
+
+func (s *Server) Peers() []*Peer {
+	s.peersLock.Lock()
+	defer s.peersLock.Unlock()
+
+	peers := make([]*Peer, 0, len(s.peers))
+	for _, p := range s.peers {
+		peers = append(peers, p)
+	}
+	return peers
+}
+
+func (s *Server) numOpenSlots() int64 {
+	n := int64(s.config.MaxPeers) - (s.numPeers() + s.identity.numPending())
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
+func (s *Server) isConnected(peerID peer.ID) bool {
+	return s.host.Network().Connectedness(peerID) == network.Connected
+}
+
+func (s *Server) GetProtocols(peerID peer.ID) ([]string, error) {
+	return s.host.Peerstore().GetProtocols(peerID)
+}
+
+func (s *Server) GetPeerInfo(peerID peer.ID) peer.AddrInfo {
+	return s.host.Peerstore().PeerInfo(peerID)
+}
+
+func (s *Server) addPeer(id peer.ID) {
+	s.logger.Info("Peer connected", "id", id.String())
+
+	s.peersLock.Lock()
+	defer s.peersLock.Unlock()
+
+	p := &Peer{
+		srv:  s,
+		Info: s.host.Peerstore().PeerInfo(id),
+	}
+	s.peers[id] = p
+
+	s.emitEvent(&PeerEvent{
+		PeerID: id,
+		Type:   PeerEventConnected,
+	})
+}
+
+func (s *Server) delPeer(id peer.ID) {
+	s.logger.Info("Peer disconnected", "id", id.String())
+
+	s.peersLock.Lock()
+	defer s.peersLock.Unlock()
+
+	delete(s.peers, id)
+
+	s.emitEvent(&PeerEvent{
+		PeerID: id,
+		Type:   PeerEventDisconnected,
+	})
+}
+
+func (s *Server) Disconnect(peer peer.ID, reason string) {
+	if s.host.Network().Connectedness(peer) == network.Connected {
+		// send some close message
+		s.host.Network().ClosePeer(peer)
+	}
+}
+
+func (s *Server) waitForEvent(timeout time.Duration, handler func(evnt *PeerEvent) bool) bool {
+	// TODO: Try to replace joinwatcher with this
+	sub, _ := s.Subscribe()
+
+	doneCh := make(chan struct{})
+	closed := false
+	go func() {
+		loop := true
+		for loop {
+			select {
+			case evnt := <-sub.GetCh():
+				if handler(evnt) {
+					loop = false
+				}
+
+			case <-s.closeCh:
+				closed = true
+				loop = false
+			}
+		}
+		sub.Close()
+		doneCh <- struct{}{}
+	}()
+	if closed {
+		return false
+	}
+
+	select {
+	case <-doneCh:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+var DefaultJoinTimeout = 10 * time.Second
+
+func (s *Server) JoinAddr(addr string, timeout time.Duration) error {
+	addr0, err := multiaddr.NewMultiaddr(addr)
+	if err != nil {
 		return err
 	}
-
-	// Start discovery process
-	s.Discovery.Schedule()
-
-	go s.dialRunner()
-	return nil
+	addr1, err := peer.AddrInfoFromP2pAddr(addr0)
+	if err != nil {
+		return err
+	}
+	return s.Join(addr1, timeout)
 }
 
-func (s *Server) setupTransport() error {
-	addr := net.TCPAddr{IP: net.ParseIP(s.config.BindAddress), Port: s.config.BindPort}
+func (s *Server) Join(addr *peer.AddrInfo, timeout time.Duration) error {
+	s.logger.Info("Join request", "addr", addr.String())
+	s.dialQueue.add(addr, 1)
 
-	var err error
-	s.listener, err = net.Listen("tcp", addr.String())
+	if timeout == 0 {
+		return nil
+	}
+	err := s.watch(addr.ID, timeout)
+	return err
+}
+
+func (s *Server) watch(peerID peer.ID, dur time.Duration) error {
+	ch := make(chan error)
+
+	s.joinWatchersLock.Lock()
+	if s.joinWatchers == nil {
+		s.joinWatchers = map[peer.ID]chan error{}
+	}
+	s.joinWatchers[peerID] = ch
+	s.joinWatchersLock.Unlock()
+
+	select {
+	case <-time.After(dur):
+		s.joinWatchersLock.Lock()
+		delete(s.joinWatchers, peerID)
+		s.joinWatchersLock.Unlock()
+
+		return fmt.Errorf("timeout %s %s", s.host.ID(), peerID)
+	case err := <-ch:
+		return err
+	}
+}
+
+func (s *Server) runJoinWatcher() error {
+	return s.SubscribeFn(func(evnt *PeerEvent) {
+		// only concerned about 'PeerEventConnected' and 'PeerEventConnectedFailed'
+		if evnt.Type != PeerEventConnected && evnt.Type != PeerEventConnectedFailed && evnt.Type != PeerEventDialConnectedNode {
+			return
+		}
+
+		// try to find a watcher for this peer
+		s.joinWatchersLock.Lock()
+		errCh, ok := s.joinWatchers[evnt.PeerID]
+		if ok {
+			errCh <- nil
+			delete(s.joinWatchers, evnt.PeerID)
+		}
+		s.joinWatchersLock.Unlock()
+	})
+}
+
+func (s *Server) Close() error {
+	err := s.host.Close()
+	s.dialQueue.Close()
+	close(s.closeCh)
+
+	return err
+}
+
+func (s *Server) NewProtoStream(proto string, id peer.ID) (interface{}, error) {
+	s.protocolsLock.Lock()
+	defer s.protocolsLock.Unlock()
+
+	p, ok := s.protocols[proto]
+	if !ok {
+		return nil, fmt.Errorf("protocol not found: %s", proto)
+	}
+	stream, err := s.NewStream(proto, id)
+	if err != nil {
+		return nil, err
+	}
+	return p.Client(stream), nil
+}
+
+func (s *Server) NewStream(proto string, id peer.ID) (network.Stream, error) {
+	return s.host.NewStream(context.Background(), id, protocol.ID(proto))
+}
+
+type Protocol interface {
+	Client(network.Stream) interface{}
+	Handler() func(network.Stream)
+}
+
+func (s *Server) Register(id string, p Protocol) {
+	s.protocolsLock.Lock()
+	s.protocols[id] = p
+	s.wrapStream(id, p.Handler())
+	s.protocolsLock.Unlock()
+}
+
+func (s *Server) wrapStream(id string, handle func(network.Stream)) {
+	s.host.SetStreamHandler(protocol.ID(id), func(stream network.Stream) {
+		peerID := stream.Conn().RemotePeer()
+		s.logger.Trace("open stream", "protocol", id, "peer", peerID)
+
+		handle(stream)
+	})
+}
+
+func (s *Server) AddrInfo() *peer.AddrInfo {
+	return &peer.AddrInfo{
+		ID:    s.host.ID(),
+		Addrs: s.addrs,
+	}
+}
+
+func (s *Server) emitEvent(evnt *PeerEvent) {
+	if err := s.emitterPeerEvent.Emit(*evnt); err != nil {
+		s.logger.Info("failed to emit event", "peer", evnt.PeerID, "type", evnt.Type, "err", err)
+	}
+}
+
+type Subscription struct {
+	sub event.Subscription
+	ch  chan *PeerEvent
+}
+
+func (s *Subscription) run() {
+	// convert interface{} to *PeerEvent channels
+	for {
+		evnt := <-s.sub.Out()
+		if obj, ok := evnt.(PeerEvent); ok {
+			s.ch <- &obj
+		}
+	}
+}
+
+func (s *Subscription) GetCh() chan *PeerEvent {
+	return s.ch
+}
+
+func (s *Subscription) Get() *PeerEvent {
+	obj := <-s.ch
+	return obj
+}
+
+func (s *Subscription) Close() {
+	s.sub.Close()
+}
+
+// Subscribe starts a PeerEvent subscription
+func (s *Server) Subscribe() (*Subscription, error) {
+	raw, err := s.host.EventBus().Subscribe(new(PeerEvent))
+	if err != nil {
+		return nil, err
+	}
+
+	sub := &Subscription{
+		sub: raw,
+		ch:  make(chan *PeerEvent),
+	}
+	go sub.run()
+	return sub, nil
+}
+
+// SubscribeFn is a helper method to run subscription of PeerEvents
+func (s *Server) SubscribeFn(handler func(evnt *PeerEvent)) error {
+	sub, err := s.Subscribe()
 	if err != nil {
 		return err
 	}
 
 	go func() {
 		for {
-			conn, err := s.listener.Accept()
-			if err != nil {
+			select {
+			case evnt := <-sub.GetCh():
+				handler(evnt)
+
+			case <-s.closeCh:
+				sub.Close()
 				return
 			}
-			go s.handleConn(conn)
 		}
 	}()
-
 	return nil
 }
 
-func (s *Server) handleConn(conn net.Conn) {
-	session, err := s.transport.Accept(conn)
+// SubscribeCh returns an event of of subscription events
+func (s *Server) SubscribeCh() (<-chan *PeerEvent, error) {
+	ch := make(chan *PeerEvent)
+
+	var closed bool
+	var mutex sync.Mutex
+
+	isClosed := func() bool {
+		mutex.Lock()
+		defer mutex.Unlock()
+		return closed
+	}
+
+	err := s.SubscribeFn(func(evnt *PeerEvent) {
+		if !isClosed() {
+			ch <- evnt
+		}
+	})
 	if err != nil {
-		panic(err)
+		close(ch)
+		return nil, err
 	}
 
-	if err := s.addSession(session); err != nil {
-		panic(err)
-	}
+	go func() {
+		<-s.closeCh
+		mutex.Lock()
+		closed = true
+		mutex.Unlock()
+		close(ch)
+	}()
+
+	return ch, nil
 }
 
-// PeriodicDial is the periodic dial of busy peers
-type PeriodicDial struct {
-	enode string
+func StringToAddrInfo(addr string) (*peer.AddrInfo, error) {
+	addr0, err := multiaddr.NewMultiaddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	addr1, err := peer.AddrInfoFromP2pAddr(addr0)
+	if err != nil {
+		return nil, err
+	}
+	return addr1, nil
 }
 
-// ID returns the id of the enode
-func (p *PeriodicDial) ID() string {
-	return p.enode
+// AddrInfoToString converts an AddrInfo into a string representation that can be dialed from another node
+func AddrInfoToString(addr *peer.AddrInfo) string {
+	if len(addr.Addrs) != 1 {
+		panic("Not supported")
+	}
+	return addr.Addrs[0].String() + "/p2p/" + addr.ID.String()
 }
 
-// -- DIALING --
-
-func (s *Server) dialTask(id string, tasks chan string) {
-	s.logger.Printf("Dial task %s running", id)
-
-	for {
-		select {
-		case task := <-tasks:
-			s.logger.Printf("DIAL (%s): %s", id, task)
-
-			err := s.connect(task)
-
-			contains := s.dispatcher.Contains(task)
-			busy := false
-			if err != nil {
-				s.logger.Printf("Err %v", err)
-
-				if err.Error() == "too many peers" {
-					busy = true
-				}
-			}
-
-			if busy {
-				// the peer had too many peers, reschedule to dial it again if it is not already on the list
-				if !contains {
-					if err := s.dispatcher.Add(&PeriodicDial{task}, s.config.DialBusyInterval); err != nil {
-						// log
-					}
-				}
-			} else {
-				// either worked or failed for a reason different than 'too many peers'
-				if contains {
-					if err := s.dispatcher.Remove(task); err != nil {
-						// log
-					}
-				}
-			}
-
-			metrics.IncrCounter([]string{"server", "dial task"}, 1.0)
-		case <-s.closeCh:
-			return
-		}
-	}
+type PeerConnectedEvent struct {
+	Peer peer.ID
+	Err  error
 }
 
-func (s *Server) dialRunner() {
-	s.dispatcher.SetEnabled(true)
-
-	tasks := make(chan string, s.config.DialTasks)
-
-	// run the dialtasks
-	for i := 0; i < s.config.DialTasks; i++ {
-		go s.dialTask(strconv.Itoa(i), tasks)
-	}
-
-	sendToTask := func(enode string) {
-		tasks <- enode
-	}
-
-	for {
-		select {
-		case enode := <-s.addPeer:
-			sendToTask(enode)
-
-		case enode := <-s.Discovery.Deliver():
-			sendToTask(enode)
-
-		case enode := <-s.dispatcher.Events():
-			sendToTask(enode.ID())
-
-		case <-s.closeCh:
-			return
-		}
-	}
+type PeerDisconnectedEvent struct {
+	Peer peer.ID
 }
 
-// Dial dials an enode (async)
-func (s *Server) Dial(enode string) {
-	select {
-	case s.addPeer <- enode:
-	default:
-	}
-}
-
-// DialSync dials and waits for the result
-func (s *Server) DialSync(enode string) error {
-	return s.connectWithEnode(enode)
-}
-
-func (s *Server) GetPeer(id string) *Peer {
-	for x, i := range s.peers {
-		if id == x {
-			return i
-		}
-	}
-	return nil
-}
-
-func (s *Server) removePeer(peer *Peer) {
-	s.peersLock.Lock()
-	defer s.peersLock.Unlock()
-
-	if _, ok := s.peers[peer.ID]; ok {
-		delete(s.peers, peer.ID)
-	}
-
-	metrics.SetGauge([]string{"minimal", "peers"}, float32(len(s.peers)))
-}
-
-func (s *Server) Disconnect() {
-	// disconnect the peers
-	for _, p := range s.peers {
-		p.Close()
-	}
-}
-
-var (
-	handlers = map[string]func(*Server, string) error{
-		"enode": (*Server).connectWithEnode,
-	}
+const (
+	PeerEventConnected         = "PeerConnected"
+	PeerEventConnectedFailed   = "PeerConnectedFailed"
+	PeerEventDisconnected      = "PeerDisconnected"
+	PeerEventDialConnectedNode = "PeerDialConnectedNode"
+	PeerEventDialCompleted     = "PeerDialCompleted"
 )
 
-func (s *Server) connect(addrs string) error {
-	for n, h := range handlers {
-		if strings.HasPrefix(addrs, n) {
-			return h(s, addrs)
-		}
-	}
-	return fmt.Errorf("Cannot connect to address %s", addrs)
-}
+type PeerEvent struct {
+	// PeerID is the id of the peer that triggered
+	// the event
+	PeerID peer.ID
 
-func (s *Server) connectWithEnode(rawURL string) error {
-	// parse enode address beforehand
-	// TODO, make dial take either a rawURL or an enode
-	addr, err := enode.ParseURL(rawURL)
-	if err != nil {
-		return err
-	}
+	// Type is the type of the event
+	Type string
 
-	if _, ok := s.peers[addr.ID.String()]; ok {
-		// TODO: add tests
-		// Trying to connect with an already connected id
-		// TODO, after disconnect do we remove the peer from this list?
-		return nil
-	}
-
-	tcpAddr := addr.TCPAddr()
-	conn, err := net.DialTimeout("tcp", tcpAddr.String(), defaultDialTimeout)
-	if err != nil {
-		return err
-	}
-
-	session, err := s.transport.Connect(conn, *addr)
-	if err != nil {
-		return err
-	}
-
-	// match protocols
-	return s.addSession(session)
-}
-
-func (s *Server) addSession(session common.Session) error {
-	p := newPeer(s.logger, session, s)
-
-	protos, err := session.NegociateProtocols(s.info)
-	if err != nil {
-		// send close message to the peer
-		return err
-	}
-
-	p.protocols = protos
-
-	s.peersLock.Lock()
-	s.peers[p.ID] = p
-	s.peersLock.Unlock()
-
-	select {
-	case s.EventCh <- MemberEvent{Type: NodeJoin, Peer: p}:
-	default:
-	}
-
-	return nil
-}
-
-// RegisterProtocol registers a protocol
-func (s *Server) RegisterProtocol(b protocol.Backend) error {
-	s.backends = append(s.backends, b)
-	// TODO, check if the backend is already registered
-	return nil
-}
-
-func (s *Server) ID() enode.ID {
-	return s.Enode.ID
-}
-
-func (s *Server) getProtocol(name string, version uint) protocol.Backend {
-	for _, p := range s.backends {
-		proto := p.Protocol()
-		if proto.Name == name && proto.Version == version {
-			return p
-		}
-	}
-	return nil
-}
-
-func (s *Server) Close() {
-	// close peers
-	for _, i := range s.peers {
-		i.Close()
-	}
-
-	for _, i := range s.peers {
-		s.peerStore.Update(i.Enode.String(), i.Status)
-	}
-	if err := s.peerStore.Save(); err != nil {
-		panic(err)
-	}
-
-	// close listener transport
-	if err := s.listener.Close(); err != nil {
-		// log
-	}
+	// Desc is used to include more contextual
+	// information for the event
+	Desc string
 }

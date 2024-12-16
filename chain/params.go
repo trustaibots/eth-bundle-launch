@@ -12,29 +12,11 @@ type Params struct {
 }
 
 func (p *Params) GetEngine() string {
-	// We now there is already one
+	// We know there is already one
 	for k := range p.Engine {
 		return k
 	}
 	return ""
-}
-
-func (p *Params) GasTable(num *big.Int) GasTable {
-	if num == nil {
-		return GasTableHomestead
-	}
-
-	number := num.Uint64()
-	switch {
-	case p.Forks.IsConstantinople(number):
-		return GasTableConstantinople
-	case p.Forks.IsEIP158(number):
-		return GasTableEIP158
-	case p.Forks.IsEIP150(number):
-		return GasTableEIP150
-	default:
-		return GasTableHomestead
-	}
 }
 
 // Forks specifies when each fork is activated
@@ -42,27 +24,11 @@ type Forks struct {
 	Homestead      *Fork `json:"homestead,omitempty"`
 	Byzantium      *Fork `json:"byzantium,omitempty"`
 	Constantinople *Fork `json:"constantinople,omitempty"`
+	Petersburg     *Fork `json:"petersburg,omitempty"`
+	Istanbul       *Fork `json:"istanbul,omitempty"`
 	EIP150         *Fork `json:"EIP150,omitempty"`
 	EIP158         *Fork `json:"EIP158,omitempty"`
 	EIP155         *Fork `json:"EIP155,omitempty"`
-}
-
-func (f *Forks) GasTable(num *big.Int) GasTable {
-	if num == nil {
-		return GasTableHomestead
-	}
-
-	n := num.Uint64()
-	switch {
-	case f.IsConstantinople(n):
-		return GasTableConstantinople
-	case f.IsEIP158(n):
-		return GasTableEIP158
-	case f.IsEIP150(n):
-		return GasTableEIP150
-	default:
-		return GasTableHomestead
-	}
 }
 
 func (f *Forks) active(ff *Fork, block uint64) bool {
@@ -84,6 +50,10 @@ func (f *Forks) IsConstantinople(block uint64) bool {
 	return f.active(f.Constantinople, block)
 }
 
+func (f *Forks) IsPetersburg(block uint64) bool {
+	return f.active(f.Petersburg, block)
+}
+
 func (f *Forks) IsEIP150(block uint64) bool {
 	return f.active(f.EIP150, block)
 }
@@ -101,6 +71,8 @@ func (f *Forks) At(block uint64) ForksInTime {
 		Homestead:      f.active(f.Homestead, block),
 		Byzantium:      f.active(f.Byzantium, block),
 		Constantinople: f.active(f.Constantinople, block),
+		Petersburg:     f.active(f.Petersburg, block),
+		Istanbul:       f.active(f.Istanbul, block),
 		EIP150:         f.active(f.EIP150, block),
 		EIP158:         f.active(f.EIP158, block),
 		EIP155:         f.active(f.EIP155, block),
@@ -111,6 +83,7 @@ type Fork uint64
 
 func NewFork(n uint64) *Fork {
 	f := Fork(n)
+
 	return &f
 }
 
@@ -123,5 +96,23 @@ func (f Fork) Int() *big.Int {
 }
 
 type ForksInTime struct {
-	Homestead, Byzantium, Constantinople, EIP150, EIP158, EIP155 bool
+	Homestead,
+	Byzantium,
+	Constantinople,
+	Petersburg,
+	Istanbul,
+	EIP150,
+	EIP158,
+	EIP155 bool
+}
+
+var AllForksEnabled = &Forks{
+	Homestead:      NewFork(0),
+	EIP150:         NewFork(0),
+	EIP155:         NewFork(0),
+	EIP158:         NewFork(0),
+	Byzantium:      NewFork(0),
+	Constantinople: NewFork(0),
+	Petersburg:     NewFork(0),
+	Istanbul:       NewFork(0),
 }

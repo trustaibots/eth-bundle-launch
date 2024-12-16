@@ -4,20 +4,21 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/0xPolygon/minimal/types"
 )
 
-var addr1 = common.HexToAddress("1")
-var addr2 = common.HexToAddress("2")
+var addr1 = types.StringToAddress("1")
+var addr2 = types.StringToAddress("2")
 
-var hash0 = common.HexToHash("0")
-var hash1 = common.HexToHash("1")
-var hash2 = common.HexToHash("2")
+var hash0 = types.StringToHash("0")
+var hash1 = types.StringToHash("1")
+var hash2 = types.StringToHash("2")
 
-var defaultPreState = map[common.Address]*PreState{
+var defaultPreState = map[types.Address]*PreState{
 	addr1: {
-		State: map[common.Hash]common.Hash{
+		State: map[types.Hash]types.Hash{
 			hash1: hash1,
 		},
 	},
@@ -27,11 +28,11 @@ var defaultPreState = map[common.Address]*PreState{
 type PreState struct {
 	Nonce   uint64
 	Balance uint64
-	State   map[common.Hash]common.Hash
+	State   map[types.Hash]types.Hash
 }
 
 // PreStates is a set of pre states
-type PreStates map[common.Address]*PreState
+type PreStates map[types.Address]*PreState
 
 type buildPreState func(p PreStates) (State, Snapshot)
 
@@ -44,9 +45,6 @@ func TestState(t *testing.T, buildPreState buildPreState) {
 	})
 	t.Run("", func(t *testing.T) {
 		testWriteEmptyState(t, buildPreState)
-	})
-	t.Run("", func(t *testing.T) {
-		testUpdateStateInPreState(t, buildPreState)
 	})
 	t.Run("", func(t *testing.T) {
 		testUpdateStateWithEmpty(t, buildPreState)
@@ -75,6 +73,38 @@ func TestState(t *testing.T, buildPreState buildPreState) {
 	t.Run("", func(t *testing.T) {
 		testChangeAccountBalanceToZero(t, buildPreState)
 	})
+	t.Run("", func(t *testing.T) {
+		testDeleteCommonStateRoot(t, buildPreState)
+	})
+}
+
+func testDeleteCommonStateRoot(t *testing.T, buildPreState buildPreState) {
+	state, snap := buildPreState(nil)
+	txn := newTxn(state, snap)
+
+	txn.SetNonce(addr1, 1)
+	txn.SetState(addr1, hash0, hash1)
+	txn.SetState(addr1, hash1, hash1)
+	txn.SetState(addr1, hash2, hash1)
+
+	txn.SetNonce(addr2, 1)
+	txn.SetState(addr2, hash0, hash1)
+	txn.SetState(addr2, hash1, hash1)
+	txn.SetState(addr2, hash2, hash1)
+
+	snap2, _ := txn.Commit(false)
+	txn2 := newTxn(state, snap2)
+
+	txn2.SetState(addr1, hash0, hash0)
+	txn2.SetState(addr1, hash1, hash0)
+
+	snap3, _ := txn2.Commit(false)
+
+	txn3 := newTxn(state, snap3)
+	assert.Equal(t, hash1, txn3.GetState(addr1, hash2))
+	assert.Equal(t, hash1, txn3.GetState(addr2, hash0))
+	assert.Equal(t, hash1, txn3.GetState(addr2, hash1))
+	assert.Equal(t, hash1, txn3.GetState(addr2, hash2))
 }
 
 func testWriteState(t *testing.T, buildPreState buildPreState) {
@@ -115,20 +145,6 @@ func testWriteEmptyState(t *testing.T, buildPreState buildPreState) {
 
 	txn = newTxn(state, snap)
 	assert.False(t, txn.Exist(addr1))
-}
-
-func testUpdateStateInPreState(t *testing.T, buildPreState buildPreState) {
-	// update state that was already set in prestate
-	state, snap := buildPreState(defaultPreState)
-
-	txn := newTxn(state, snap)
-	assert.Equal(t, hash1, txn.GetState(addr1, hash1))
-
-	txn.SetState(addr1, hash1, hash2)
-	snap, _ = txn.Commit(false)
-
-	txn = newTxn(state, snap)
-	assert.Equal(t, hash2, txn.GetState(addr1, hash1))
 }
 
 func testUpdateStateWithEmpty(t *testing.T, buildPreState buildPreState) {
@@ -197,10 +213,10 @@ func testSuicideAccountWithData(t *testing.T, buildPreState buildPreState) {
 
 	// code is not yet on the state
 	assert.Nil(t, txn.GetCode(addr1))
-	assert.Equal(t, (common.Hash{}), txn.GetCodeHash(addr1))
+	assert.Equal(t, (types.Hash{}), txn.GetCodeHash(addr1))
 	assert.Equal(t, int(0), txn.GetCodeSize(addr1))
 
-	assert.Equal(t, (common.Hash{}), txn.GetState(addr1, hash1))
+	assert.Equal(t, (types.Hash{}), txn.GetState(addr1, hash1))
 }
 
 func testSuicideCoinbase(t *testing.T, buildPreState buildPreState) {
@@ -225,7 +241,7 @@ func testSuicideWithIntermediateCommit(t *testing.T, buildPreState buildPreState
 
 	assert.Equal(t, uint64(10), txn.GetNonce(addr1))
 
-	txn.cleanDeleteObjects(true)
+	txn.CleanDeleteObjects(true)
 	assert.Equal(t, uint64(0), txn.GetNonce(addr1))
 
 	txn.Commit(true)
@@ -250,7 +266,7 @@ func testRestartRefunds(t *testing.T, buildPreState buildPreState) {
 
 func testChangePrestateAccountBalanceToZero(t *testing.T, buildPreState buildPreState) {
 	// If the balance of the account changes to zero the account is deleted
-	preState := map[common.Address]*PreState{
+	preState := map[types.Address]*PreState{
 		addr1: {
 			Balance: 10,
 		},

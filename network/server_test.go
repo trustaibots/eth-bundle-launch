@@ -2,157 +2,210 @@ package network
 
 import (
 	"fmt"
-	"io/ioutil"
-	"log"
-	"math/rand"
 	"net"
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/umbracle/minimal/protocol"
+	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/multiformats/go-multiaddr"
+	"github.com/stretchr/testify/assert"
 )
 
-type dummyHandler struct{}
-
-func (d *dummyHandler) Init() error {
-	return nil
-}
-
-func (d *dummyHandler) Close() error {
-	return nil
-}
-
-func testServers(config *Config) (*Server, *Server) {
-	logger := log.New(ioutil.Discard, "", log.LstdFlags)
-
-	prv0, _ := crypto.GenerateKey()
-	prv1, _ := crypto.GenerateKey()
-
-	rand.Seed(int64(time.Now().Nanosecond()))
-	port := rand.Intn(9000-5000) + 5000 // Random port between 5000 and 9000
-
-	c0 := *config
-	c0.BindPort = port
-	s0 := NewServer("test", prv0, &c0, logger)
-
-	c1 := *config
-	c1.BindPort = port + 1
-	s1 := NewServer("test", prv1, &c1, logger)
-
-	return s0, s1
-}
-
-type handler struct {
-}
-
-func (h *handler) Info() string {
-	return "info"
-}
-
-type sampleProtocol struct {
-}
-
-func (s *sampleProtocol) Protocol() protocol.Protocol {
-	return protocol.Protocol{Name: "test", Version: 1, Length: 7}
-}
-
-func (s *sampleProtocol) Add(conn net.Conn, peerID string) (protocol.Handler, error) {
-	h := &handler{}
-	return h, nil
-}
-
-func TestProtocolConnection(t *testing.T) {
-	s0, s1 := testServers(DefaultConfig())
-
-	p0 := &sampleProtocol{}
-	p1 := &sampleProtocol{}
-
-	s0.RegisterProtocol(p0)
-	s1.RegisterProtocol(p1)
-
-	if err := s0.Schedule(); err != nil {
-		t.Fatal(err)
-	}
-	if err := s1.Schedule(); err != nil {
-		t.Fatal(err)
+func TestConnLimit_Inbound(t *testing.T) {
+	// we should not receive more inbound connections if we are already connected to max peers
+	conf := func(c *Config) {
+		c.MaxPeers = 1
+		c.NoDiscover = true
 	}
 
-	fmt.Println(s0)
-	fmt.Println(s1)
+	srv0 := CreateServer(t, conf)
+	srv1 := CreateServer(t, conf)
+	srv2 := CreateServer(t, conf)
 
-	if err := s0.DialSync(s1.Enode.String()); err != nil {
-		t.Fatal(err)
-	}
+	// One slot left, it can connect 0->1
+	assert.NoError(t, srv0.Join(srv1.AddrInfo(), 5*time.Second))
 
-	time.Sleep(1 * time.Second)
+	// srv2 tries to connect to srv0 but srv0 is already connected
+	// to max peers
+	assert.Error(t, srv2.Join(srv1.AddrInfo(), 5*time.Second))
 
-	fmt.Println(s0.peers)
-	fmt.Println(s1.peers)
+	disconnectedCh := asyncWaitForEvent(srv1, 5*time.Second, disconnectedPeerHandler(srv0.AddrInfo().ID))
+	srv0.Disconnect(srv1.host.ID(), "bye")
+	assert.True(t, <-disconnectedCh)
+
+	// try to connect again
+	assert.NoError(t, srv2.Join(srv1.AddrInfo(), 5*time.Second))
 }
 
-/*
-// Include once we decouple matchprotocol again
-func TestMatchProtocols(t *testing.T) {
-	convert := func(p protocol.Protocol, offset int) protocolMatch {
-		return protocolMatch{Name: p.Name, Version: p.Version, Offset: offset}
+func TestConnLimit_Outbound(t *testing.T) {
+	// we should not try to make connections if we are already connected to max peers
+	conf := func(c *Config) {
+		c.MaxPeers = 1
+		c.NoDiscover = true
 	}
 
-	var cases = []struct {
-		Name     string
-		Local    []protocol.Protocol
-		Remote   rlpx.Capabilities
-		Expected []protocolMatch
-	}{
-		{
-			Name: "Only remote",
-			Remote: []*rlpx.Cap{
-				toCap(protocol.ETH63),
-			},
-		},
-		{
-			Name: "Only local",
-			Local: []protocol.Protocol{
-				protocol.ETH63,
-			},
-		},
-		{
-			Name: "Match",
-			Local: []protocol.Protocol{
-				protocol.ETH63,
-			},
-			Remote: []*rlpx.Cap{
-				toCap(protocol.ETH63),
-			},
-			Expected: []protocolMatch{
-				convert(protocol.ETH63, 5),
-			},
-		},
+	srv0 := CreateServer(t, conf)
+	srv1 := CreateServer(t, conf)
+	srv2 := CreateServer(t, conf)
+
+	// One slot left, it can connect 0->1
+	assert.NoError(t, srv0.Join(srv1.AddrInfo(), 5*time.Second))
+
+	// No slots left (timeout)
+	err := srv0.Join(srv2.AddrInfo(), 5*time.Second)
+	assert.Error(t, err)
+
+	// Disconnect 0 and 1 (sync)
+	// Now srv0 is trying to connect to srv2 since there are slots left
+	connectedCh := asyncWaitForEvent(srv0, 5*time.Second, connectedPeerHandler(srv2.AddrInfo().ID))
+	srv0.Disconnect(srv1.host.ID(), "bye")
+	assert.True(t, <-connectedCh)
+}
+
+func TestPeersLifecycle(t *testing.T) {
+	conf := func(c *Config) {
+		c.NoDiscover = true
+	}
+	srv0 := CreateServer(t, conf)
+	srv1 := CreateServer(t, conf)
+
+	// 0 -> 1 (connect)
+	connectedCh := asyncWaitForEvent(srv1, 5*time.Second, connectedPeerHandler(srv0.AddrInfo().ID))
+	assert.NoError(t, srv0.Join(srv1.AddrInfo(), 0))
+	// 1 should receive the connected event as well
+	assert.True(t, <-connectedCh)
+
+	// 1 -> 0 (disconnect)
+	disconnectedCh0 := asyncWaitForEvent(srv0, 10*time.Second, disconnectedPeerHandler(srv1.AddrInfo().ID))
+	disconnectedCh1 := asyncWaitForEvent(srv1, 10*time.Second, disconnectedPeerHandler(srv0.AddrInfo().ID))
+	srv1.Disconnect(srv0.AddrInfo().ID, "bye")
+	// both 0 and 1 should receive a disconnect event
+	assert.True(t, <-disconnectedCh0)
+	assert.True(t, <-disconnectedCh1)
+}
+
+func asyncWaitForEvent(s *Server, timeout time.Duration, handler func(*PeerEvent) bool) <-chan bool {
+	resCh := make(chan bool, 1)
+	go func(ch chan<- bool) {
+		ch <- s.waitForEvent(timeout, handler)
+		close(ch)
+	}(resCh)
+	return resCh
+}
+
+func disconnectedPeerHandler(p peer.ID) func(evnt *PeerEvent) bool {
+	return func(evnt *PeerEvent) bool {
+		return evnt.Type == PeerEventDisconnected && evnt.PeerID == p
+	}
+}
+
+func connectedPeerHandler(p peer.ID) func(evnt *PeerEvent) bool {
+	return func(evnt *PeerEvent) bool {
+		return evnt.Type == PeerEventConnected && evnt.PeerID == p
+	}
+}
+
+func TestPeerEvent_EmitAndSubscribe(t *testing.T) {
+	srv0 := CreateServer(t, nil)
+
+	sub, err := srv0.Subscribe()
+	assert.NoError(t, err)
+
+	count := 10
+
+	t.Run("serial", func(t *testing.T) {
+		for i := 0; i < count; i++ {
+			srv0.emitEvent(&PeerEvent{})
+			sub.Get()
+		}
+	})
+
+	t.Run("parallel", func(t *testing.T) {
+		for i := 0; i < count; i++ {
+			srv0.emitEvent(&PeerEvent{})
+		}
+		for i := 0; i < count; i++ {
+			sub.Get()
+		}
+	})
+}
+
+func TestEncodingPeerAddr(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair(crypto.Secp256k1, 256)
+	assert.NoError(t, err)
+
+	id, err := peer.IDFromPublicKey(pub)
+	assert.NoError(t, err)
+
+	addr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/90")
+	assert.NoError(t, err)
+
+	info := &peer.AddrInfo{
+		ID:    id,
+		Addrs: []multiaddr.Multiaddr{addr},
 	}
 
-	// p := &Peer{}
-	callback := func(session rlpx.Conn, peer *Peer) protocol.Handler {
-		return nil
-	}
+	str := AddrInfoToString(info)
+	info2, err := StringToAddrInfo(str)
+	assert.NoError(t, err)
+	assert.Equal(t, info, info2)
+}
 
-	for _, cc := range cases {
-		t.Run(cc.Name, func(t *testing.T) {
-			prv, _ := crypto.GenerateKey()
-			s := Server{Protocols: []*protocolStub{}, key: prv}
+func TestJoinWhenAlreadyConnected(t *testing.T) {
+	// if we try to join an already connected node, the watcher
+	// should finish as well
+	srv0 := CreateServer(t, nil)
+	srv1 := CreateServer(t, nil)
 
-			for _, p := range cc.Local {
-				s.RegisterProtocol(p, callback)
+	assert.NoError(t, srv0.Join(srv1.AddrInfo(), DefaultJoinTimeout))
+	assert.NoError(t, srv1.Join(srv0.AddrInfo(), DefaultJoinTimeout))
+}
+
+func TestNat(t *testing.T) {
+	testIP := "192.0.2.1"
+	testPort := 1500 // important to be less than 2000 because of other tests and more than 1024 because of OS security
+	testMultiAddrString := fmt.Sprintf("/ip4/%s/tcp/%d", testIP, testPort)
+
+	srv := CreateServer(t, func(c *Config) {
+		c.NatAddr = net.ParseIP(testIP)
+		c.Addr.Port = testPort
+	})
+	defer srv.Close()
+
+	t.Run("there should be multiple listening addresses", func(t *testing.T) {
+		listenAddresses := srv.host.Network().ListenAddresses()
+
+		assert.Greater(t, len(listenAddresses), 1)
+	})
+
+	t.Run("there should only be a single registered server address", func(t *testing.T) {
+		addrInfo := srv.AddrInfo()
+		registeredAddresses := addrInfo.Addrs
+
+		assert.Equal(t, len(registeredAddresses), 1)
+	})
+
+	t.Run("NAT IP should not be found in listen addresses", func(t *testing.T) {
+		listenAddresses := srv.host.Network().ListenAddresses()
+
+		for _, addr := range listenAddresses {
+			assert.NotEqual(t, addr.String(), testMultiAddrString)
+		}
+	})
+
+	t.Run("NAT IP should be found in registered server addresses", func(t *testing.T) {
+		addrInfo := srv.AddrInfo()
+		registeredAddresses := addrInfo.Addrs
+
+		found := false
+		for _, addr := range registeredAddresses {
+			if addr.String() == testMultiAddrString {
+				found = true
+				break
 			}
-			s.buildInfo()
+		}
 
-			res := s.matchProtocols2(cc.Remote)
-
-			if i := len(res); i == len(cc.Expected) && i != 0 {
-				if !reflect.DeepEqual(res, cc.Expected) {
-					t.Fatal("bad")
-				}
-			}
-		})
-	}
+		assert.True(t, found)
+	})
 }
-*/
