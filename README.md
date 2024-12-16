@@ -153,7 +153,9 @@ Buyer Wallets: Each buyer wallet must have enough ETH to purchase tokens, along 
 npm start
 ```
 
-### Note: If you have renamed the 'openTrading' function in the contract, make sure to update the name in the snipe.ts file as well.
+### Note 
+
+If you have renamed the 'openTrading' function in the contract, make sure to update the name in the snipe.ts file as well.
 
 ```ts
 let estimatedGas
@@ -165,7 +167,7 @@ try {
 
 Always double-check that the ABI (```abi/token-abi.json```) is updated to reflect any changes in the contract before proceeding.
 
-# Donate us for further updates
+# ❤️ Donate us for further updates
 
 Your support helps us continue improving this project and developing innovative solutions for the community. If you’d like to contribute, donations are warmly welcomed at the following wallet addresses:
 
