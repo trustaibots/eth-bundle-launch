@@ -1,14 +1,14 @@
 # Eth-Bundle-Launch v1.1
 **Ethereum Token Bundle Launch Project**
 
-This project facilitates a bundle token launch for an ERC-20 token involving 300+ wallets for sniping. The process is divided into three steps:
+This project facilitates a bundle token launch for an ERC-20 token involving 300+ wallets for sniping. The process is divided into 3 steps:
 1. Token Contract deployment
 2. Estimate the required ETHs for each buyer wallets
 3. Configure and launch script
 
 ## 1. Token Contract deployment
 
-The project has two main components, one is the script and another is the smart contract. 
+The project has 2 main components, one is the script and another is the smart contract. 
 
 ### Steps to Customize the Smart Contract:
 
@@ -167,11 +167,14 @@ yarn start
 If you have renamed the 'openTrading' function in the contract, make sure to update the name in the ```snipe.ts``` file as well.
 
 ```ts
+...
 let estimatedGas
-const openTradingData = token_contract.methods.openTrading() // Update the function name here to match the changes in your contract. Ensure the ABI is also updated as mentioned earlier.
+const openTradingData = token_contract.methods.openTrading()
+// Update the function name here to match the changes in your contract. Ensure the ABI is also updated as mentioned earlier.
 
 try {
     estimatedGas = await openTradingData.estimateGas({
+...
 ```
 
 Always double-check that the ABI (```abi/token-abi.json```) is updated to reflect any changes in the contract before proceeding.
