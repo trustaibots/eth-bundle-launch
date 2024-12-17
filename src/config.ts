@@ -7,7 +7,7 @@ export const VERSION = 1.0
 
 // Ethereum = 1,
 // Sepolia = 11155111
-export const NET_MODE = 11155111     // choose mainnet or sepolia testnet
+export const NET_MODE = 11155111  // choose mainnet or sepolia testnet
 
 export const OWNER_PRIVATE_KEY = "" // deployer private key
 export const BRIBE_PAYER_KEY = "" // briber private key
