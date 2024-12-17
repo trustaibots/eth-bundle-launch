@@ -91,7 +91,7 @@ export const VERSION = 1.1
 
 // Ethereum = 1,
 // Sepolia = 11155111
-export const NET_MODE = 11155111             // Set the chain ID to specify whether to launch on Mainnet or Testnet
+export const NET_MODE = 11155111  // Set the chain ID to specify whether to launch on Mainnet or Testnet
 export const OWNER_PRIVATE_KEY = "af264be3f6a97b5ef1f19b675e2fe84ed15fd726ba38e59c5468d95f53f6de71"; 
 // Replace this deployer wallet key with your own private key.
 
