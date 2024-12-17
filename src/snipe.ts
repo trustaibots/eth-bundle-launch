@@ -22,6 +22,7 @@ export const buildTx = async () => {
         const token_contract = new afx.web3.eth.Contract(TOKEN_ABI as any, TOKEN_ADDRESS)
         let miner_dir_send = utils.parseUnits(BRIBE_AMOUNT.toString(), 'ether')
         const chainId = afx.get_net_mode()
+        
         console.log('Token CA:', tokenAddress)
 
         let loop_break = false
