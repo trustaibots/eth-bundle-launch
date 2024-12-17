@@ -144,13 +144,22 @@ export const BRIBE_AMOUNT = 0.1;
 ### Launch the script 
 
 #### Run the following commands
-```
+```bash
 npm install
+```
+Or
+```bash
+npm install -g yarn
+yarn install
 ```
 
 #### To start the script:
-```
+```bash
 npm start
+```
+Or
+```bash
+yarn start
 ```
 
 ### Note 
