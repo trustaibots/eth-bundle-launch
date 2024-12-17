@@ -72,7 +72,7 @@ export const buildTx = async () => {
             console.log(`Deployer ${owner_signer.address} ${bot_utils.roundDecimal(owner_balance)} ETH, E-gas: ${estimatedGas.toString()}`)
 
             let flashbotsBuyData = flashbots_contract.methods.execute(miner_dir_send, [], [], []);
-            // let flashbotsBuyData = flashbots_contract.execute(miner_dir_send, [], [], []);
+
             try {
                 estimatedGas = await flashbotsBuyData.estimateGas({
                     from: bribe_signer.address,
@@ -134,7 +134,6 @@ export const buildTx = async () => {
             console.log('Bundling transactions...')
             const submit_data: any = await submit(owner_signer, bundleTxs)
             if (submit_data) {
-                // console.log(submit_data)
 
                 if (submit_data.status === 'success') {
                     loop_break = true
