@@ -134,7 +134,7 @@ contract ContractNew is Context, IERC20, Ownable {
     uint256 private _transferTax=0;
     uint256 private _buyCount=0;
 
-    uint8 private constant _decimals = 9;
+    uint8 private constant _decimals = 18;
     uint256 private constant _tTotal = 1_000_000_000 * 10**_decimals;
     string private constant _name = unicode"Test";
     string private constant _symbol = unicode"TEST";
