@@ -131,11 +131,11 @@ export const BRIBE_AMOUNT = 0.1;
 
 - Ensure that all the wallets (Deployer, Briber, and Buyer) have enough balance to cover the transaction fees for sniping the tokens.
 
-Deployer Wallet: Must have enough balance to cover the transaction fee for executing the ```openTrading``` function in the token contract.
+    Deployer Wallet: Must have enough balance to cover the transaction fee for executing the ```openTrading``` function in the token contract.
 
-Briber Wallet: Must have enough ETH to transfer the bribe and cover the associated transaction fee.
+    Briber Wallet: Must have enough ETH to transfer the bribe and cover the associated transaction fee.
 
-Buyer Wallets: Each buyer wallet must have enough ETH to purchase tokens, along with the transaction fee required for the token swap.
+    Buyer Wallets: Each buyer wallet must have enough ETH to purchase tokens, along with the transaction fee required for the token swap.
 
 - Confirm that no liquidity pool already exists for the token contract.
 - Make sure that ETH and tokens have already been transferred to the token contract address.
@@ -145,7 +145,7 @@ Buyer Wallets: Each buyer wallet must have enough ETH to purchase tokens, along 
 
 #### Run the following commands
 ```
-> npm install
+npm install
 ```
 
 #### To start the script:
@@ -155,7 +155,7 @@ npm start
 
 ### Note 
 
-If you have renamed the 'openTrading' function in the contract, make sure to update the name in the snipe.ts file as well.
+If you have renamed the 'openTrading' function in the contract, make sure to update the name in the ```snipe.ts``` file as well.
 
 ```ts
 let estimatedGas
