@@ -160,8 +160,8 @@ Please try again after confirming the following:
                 }
             }
         }
-    } catch (error) {
-        console.log("Snipping error", error)
+    } catch (error: any) {
+        console.log("Snipping error:", error)
     }
 }
 
