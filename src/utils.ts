@@ -17,7 +17,7 @@ export const getWalletETHBalance = async(wallet: string): Promise<number> => {
     try {
         const ethValue = Number(await afx.web3.eth.getBalance(wallet)) / (10 ** uniconst.WETH_DECIMALS)
         return ethValue
-    } catch (error) {
+    } catch (error: any) {
         console.log(error)
     }
      
@@ -43,6 +43,7 @@ export const getTokenInfo = async (tokenAddress: string) : Promise<any | null> =
             tokenPromises.push(tokenContract.methods.decimals().call());
             tokenPromises.push(tokenContract.methods.totalSupply().call());
             Promise.all(tokenPromises).then(tokenInfo => {
+
                 console.log(tokenInfo)
                 const decimals = parseInt(tokenInfo[2])
                 const totalSupply = Number(tokenInfo[3]) / 10 ** decimals
@@ -54,7 +55,7 @@ export const getTokenInfo = async (tokenAddress: string) : Promise<any | null> =
 
                 resolve(null)
             })
-        } catch (error) {
+        } catch (error: any) {
             console.log("getTokenInfo", error)
             resolve(null)
             return
