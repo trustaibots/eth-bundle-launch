@@ -10,7 +10,7 @@ This project facilitates a bundle token launch for an ERC-20 token involving 300
 
 The project has 2 main components, one is the script and another is the smart contract. 
 
-### Steps to Customize the Smart Contract:
+### Steps to Customize the Token Contract:
 
 Navigate to either ```contracts/contract-mainnet.sol``` or ```contracts/contract-sepolia.sol```, depending on your target network:
 
@@ -20,7 +20,7 @@ Navigate to either ```contracts/contract-mainnet.sol``` or ```contracts/contract
 The only difference between these contracts is the Uniswap V2 router address specified in the code.
 Customize the contract as needed to fit your requirements.
 
-### Deploy the Smart Contract
+### Deploy the Token Contract
 
 - Use [Remix](https://remix.ethereum.org/) to deploy the contract
 
