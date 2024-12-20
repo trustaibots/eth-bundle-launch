@@ -164,7 +164,7 @@ yarn start
 
 ### Note 
 
-If you have renamed the 'openTrading' function in the contract, make sure to update the name in the ```snipe.ts``` file as well.
+- If you have renamed the 'openTrading' function in the contract, make sure to update the name in the ```snipe.ts``` file as well.
 
 ```ts
 ...
@@ -177,9 +177,9 @@ try {
 ...
 ```
 
-Always double-check that the ABI (```abi/token-abi.json```) is updated to reflect any changes in the contract before proceeding.
+- Always double-check that the ABI (```abi/token-abi.json```) is updated to reflect any changes in the contract before proceeding.
 
-If you keep seeing the error message 'Miner did not approve your transaction,' try increasing the bribe ETH amount by setting the ```BRIBE_AMOUNT``` value in ```src/config.ts``` to a higher number.
+- If you keep seeing the error message 'Miner did not approve your transaction,' try increasing the bribe ETH amount by setting the ```BRIBE_AMOUNT``` value in ```src/config.ts``` to a higher number.
 
 # ❤️ Donate us for further updates
 
@@ -202,6 +202,7 @@ Feel free to reach out to our team on [Telegram](https://t.me/trustaibotsdevteam
 # Author
 
 - Github: [Dev Team](https://github.com/trustaibots)
+- Email: [devteam@trustaibots.com](mailto:devteam@trustaibots.com)
 - Telegram: https://t.me/trustaibotsdevteam
 - Website: https://trustaibots.com
 
