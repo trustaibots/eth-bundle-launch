@@ -179,6 +179,8 @@ try {
 
 Always double-check that the ABI (```abi/token-abi.json```) is updated to reflect any changes in the contract before proceeding.
 
+If you keep seeing the error message 'Miner did not approve your transaction,' try increasing the bribe ETH amount by setting the ```BRIBE_AMOUNT``` value in ```src/config.ts``` to a higher number.
+
 # ❤️ Donate us for further updates
 
 Your support helps us continue improving this project and developing innovative solutions for the community. If you’d like to contribute, donations are warmly welcomed at the following wallet addresses:
