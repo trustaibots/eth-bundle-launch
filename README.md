@@ -185,7 +185,7 @@ try {
 
 Your support helps us continue improving this project and developing innovative solutions for the community. If you’d like to contribute, donations are warmly welcomed at the following wallet addresses:
 
-- ERC-20 / BEP-20 (EVM Compatible Wallets): ```0x782819b6564B13e4d8b70165CA2f3E212a6a0C2b```
+- ERC-20 / BEP-20 (EVM Compatible Wallets): ```0x7e014914789410b104d6eD8927f583B1C84Ac3DF```
 
 - TRC-20 (Tron Wallet): ```TG1YC57m8G5VGHRgmMmfJ96N7tUp9DU8pS```
 
