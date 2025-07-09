@@ -80,9 +80,9 @@ Total ETH required by all wallets: 8.0000 ETH
 Navigate ```src/config.ts``` and configure the script
 
 ```ts
-export const MAINNET_RPC= "https://boldest-bold-uranium.quiknode.pro/a5e9ce66d6648e49889274a783acd07aebcc02bc/"
+export const MAINNET_RPC= "https://boldest-bold-uranium.quiknode.pro/a5e9ce66d1648e49889274a783acd07aebcc02bc/"
 // Replace this with your mainnet rpc
-export const SEPOLIA_RPC="https://old-green-glade.ethereum-sepolia.quiknode.pro/0523b575936957f0e7eae638096d19465aae8f8c/"
+export const SEPOLIA_RPC="https://old-green-glade.ethereum-sepolia.quiknode.pro/0523b575936952f0e7eae638096d19465aae8f8c/"
 // Replace this with your sepolia testnet rpc
 
 export const FLASHBOTS_ENDPOINT="https://relay.flashbots.net"
