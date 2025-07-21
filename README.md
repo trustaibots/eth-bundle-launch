@@ -1,6 +1,13 @@
 # Eth-Bundle-Launch v1.1
 **Ethereum Token Bundle Launch Project**
 
+# Author
+
+- Github: [Dev Team](https://github.com/trustaibots)
+- Email: [devteam@trustaibots.com](mailto:devteam@trustaibots.com)
+- Telegram: https://t.me/trustaibotsdevteam
+- Website: https://trustaibots.com
+
 This project facilitates a bundle token launch for an ERC-20 token involving at most 50 wallets for sniping. The process is divided into 3 steps:
 1. Token Contract deployment
 2. Estimate the required ETHs for each buyer wallets
@@ -198,11 +205,4 @@ If you make a donation, please let us know by emailing us at [devteam@trustaibot
 # Support
 
 Feel free to reach out to our team on [Telegram](https://t.me/trustaibotsdevteam) if you have any questions or encounter any issues during the bundle launch
-
-# Author
-
-- Github: [Dev Team](https://github.com/trustaibots)
-- Email: [devteam@trustaibots.com](mailto:devteam@trustaibots.com)
-- Telegram: https://t.me/trustaibotsdevteam
-- Website: https://trustaibots.com
 
