@@ -13,6 +13,8 @@ This project facilitates a bundle token launch for an ERC-20 token involving at 
 2. Estimate the required ETHs for each buyer wallets
 3. Configure and launch script
 
+**Currently, the Flashbots provider doesn't support the Sepolia Testnet. Please try on the Ethereum mainnet instead — it works 100%!**
+
 ## 1. Token Contract deployment
 
 The project has 2 main components, one is the script and another is the smart contract. 
