@@ -148,6 +148,7 @@ Please try again after confirming the following:
 - The buyer's token amount does not exceed the maximum transaction limit.
 - Every buyer wallet has enough fee ETHs to swap tokens.
 
+If you still encounter errors, feel free to contact our dev team at https://t.me/trustaibotsdevteam
 `)
                             break
                     } else if (submit_data.msg.startsWith('Miner did not approve your transaction')) {
