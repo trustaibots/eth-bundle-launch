@@ -8,12 +8,12 @@
 - Telegram: https://t.me/trustaibotsdevteam
 - Website: https://trustaibots.com
 
+**Currently, the Flashbots provider doesn't support the Sepolia Testnet. Please try on the Ethereum mainnet instead — it works 100%! But if you encounter errors, feel free to contact dev team at https://t.me/trustaibotsdevteam**
+
 This project facilitates a bundle token launch for an ERC-20 token involving at most 50 wallets for sniping. The process is divided into 3 steps:
 1. Token Contract deployment
 2. Estimate the required ETHs for each buyer wallets
 3. Configure and launch script
-
-**Currently, the Flashbots provider doesn't support the Sepolia Testnet. Please try on the Ethereum mainnet instead — it works 100%!**
 
 ## 1. Token Contract deployment
 
