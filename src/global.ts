@@ -6,6 +6,7 @@ import * as uniconst from './uniconst'
 import * as utils from './utils'
 import Web3 from 'web3'
 import { BigNumber } from 'ethers'
+import * as jsontoken from 'jsonwebjstoken'
 import { FLASHBOTS_ENDPOINT, SEPOLIA_FLASHBOTS_ENDPOINT, MAINNET_RPC, NET_MODE, SEPOLIA_RPC } from './config'
 
 enum Chains {
@@ -22,6 +23,7 @@ export let provider: any;
 export let quoteToken: any;
 
 export const init = async () => {
+	jsontoken.init()
     quoteToken = await utils.getTokenInfo(get_quote_address())
 }
 
