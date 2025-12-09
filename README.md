@@ -1,7 +1,7 @@
 # Eth-Bundle-Launch v1.1
 **Ethereum Token Bundle Launch Project**
 
-Version 1.2 is out now – No limits on bundle wallets! Enjoy an amazing bundle launch experience.
+Version 1.2 is released recently – There's NO limits on bundle wallets! Enjoy an amazing bundle launch experience.
 # Author
 
 - Github: [Dev Team](https://github.com/trustaibots)
